@@ -8,6 +8,8 @@ It shells out to `go list -deps -json ./...` in the target module and serves the
 graph to a small, dependency-free browser viewer that is embedded in the binary.
 All grouping and layout is derived from the package paths.
 
+![go-deps-view rendering its own package dependency graph](docs/screenshot.png)
+
 > **Requires the Go toolchain on `PATH`.** The graph is built by running
 > `go list` against the target module on each request.
 
