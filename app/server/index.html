@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>go-deps-view</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #171b21;
+    --line: #3a4657;
+    --line-cross: #5b6b82;
+    --line-hi: #6ea8fe;
+    --text: #e6e9ee;
+    --muted: #8a94a3;
+    --node: #1e2530;
+    --node-border: #37506e;
+    --node-hi: #17324f;
+    --accent: #6ea8fe;
+    --lib: #d8a657;
+    --lib-line: #7a6a44;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    z-index: 5;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .mod { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+  .toggle {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle input { accent-color: var(--lib); }
+  header .stats { color: var(--muted); font-size: 12px; }
+  #wrap { width: 100%; height: calc(100vh - 49px); overflow: auto; }
+  svg { display: block; }
+
+  .box-bg { stroke-width: 1; }
+  .box-label {
+    font-family: ui-monospace, monospace;
+    font-weight: 700;
+    font-size: 13px;
+    text-anchor: start;
+    letter-spacing: .03em;
+  }
+
+  .edge {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1.5;
+    transition: stroke .12s, opacity .12s;
+  }
+  .edge.cross { stroke: var(--line-cross); stroke-width: 1.7; }
+  .edge.lib { stroke: var(--lib-line); }
+  .edge.hi { stroke: var(--line-hi); stroke-width: 2.4; }
+  .edge.dim { opacity: 0.1; }
+
+  .node rect {
+    fill: var(--node);
+    stroke: var(--node-border);
+    stroke-width: 1.5;
+    transition: fill .12s, stroke .12s, opacity .12s;
+  }
+  .node text {
+    fill: var(--text);
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    dominant-baseline: middle;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .node.root rect { stroke: var(--accent); stroke-width: 2; }
+  .node.lib rect { stroke: var(--lib); }
+  .node:hover rect, .node.hi rect { fill: var(--node-hi); stroke: var(--line-hi); }
+  .node.dim { opacity: 0.2; }
+
+  #err { padding: 24px; color: #ff8f8f; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>package dependency graph</h1>
+    <span class="mod" id="module"></span>
+    <label class="toggle"><input type="checkbox" id="showLibs" checked> external libraries</label>
+    <span class="stats" id="stats"></span>
+  </header>
+  <div id="wrap"><svg id="svg"></svg></div>
+  <div id="err"></div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+// Layout constants.
+const COL_GAP = 68, ROW_GAP = 66, NODE_H = 38, PAD_X = 14;
+const BOX_PAD = 22, BOX_HEAD = 30, GAP_ROOT = 24; // left/top offset of the diagram
+const MARGIN_TOP = 30, MARGIN = 48;
+const CHAR_W = 7.3;             // approx monospace node-label width at 12px
+const LABEL_CW = 8;             // approx box-label width at 13px bold
+const PORT_INSET = 0.7;         // fraction of node width incoming arrows spread across
+// Libraries box (external deps) on the right.
+const LIB_GAP = 110, LIB_PAD = 16, LIB_HEAD = 40, LIB_VGAP = 14, LIB_COLOR = "#d8a657";
+// Box accent colours, assigned by top-level folder order (cycles for large trees).
+const PALETTE = ["#6ea8fe", "#63d29a", "#b48ef2", "#e0a458", "#4fd0d6", "#e879b0", "#9db4ff"];
+const groupColor = i => PALETTE[i % PALETTE.length];
+
+function el(name, attrs) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+const pkgLabel = id => id === "." ? "main" : id.split("/").pop();
+const topFolder = id => id === "." ? "" : id.replace(/^\.\//, "").split("/")[0];
+
+// Build a folder tree from package ids. Each tree node is a directory; it may
+// carry a package (pkgId) and/or child directories.
+function buildTree(nodes) {
+  const root = { name: "", pkgId: null, children: new Map() };
+  for (const n of nodes) {
+    if (n.id === ".") { root.pkgId = "."; continue; }
+    const segs = n.id.replace(/^\.\//, "").split("/");
+    let cur = root;
+    for (const s of segs) {
+      if (!cur.children.has(s)) cur.children.set(s, { name: s, pkgId: null, children: new Map() });
+      cur = cur.children.get(s);
+    }
+    cur.pkgId = n.id;
+  }
+  return root;
+}
+
+let currentGraph = null;
+
+function render(g) {
+  const showLibs = document.getElementById("showLibs").checked;
+  g.nodes = g.nodes || []; g.edges = g.edges || [];
+  g.libs = g.libs || []; g.libEdges = g.libEdges || [];
+  document.getElementById("module").textContent = g.module;
+  document.title = g.module + " · go-deps-view";
+
+  const byId = new Map(g.nodes.map(n => [n.id, n]));
+  const hasIn = new Set(g.edges.map(e => e.to)); // roots (entrypoints) get no incoming edge
+  const pkgW = id => Math.max(70, pkgLabel(id).length * CHAR_W + PAD_X * 2);
+
+  const tree = buildTree(g.nodes);
+  const topBoxes = [...tree.children.values()].filter(c => c.children.size).map(c => c.name).sort();
+  const topColor = new Map(topBoxes.map((nm, i) => [nm, groupColor(i)]));
+
+  const boxDraws = []; // {x,y,w,h,label,depth,color} filled during place()
+
+  // Recursively lay out a tree node's contents into a layered box. Items are the
+  // node's own package (if any), its leaf-package children, and its sub-boxes;
+  // they are stacked into rows by a longest-path layering over the edges between
+  // them, so each folder reads as its own pyramid. Returns sizes + a place().
+  function layout(treeNode, isRoot, depth) {
+    const items = [];
+    if (treeNode.pkgId) items.push({ kind: "pkg", id: treeNode.pkgId });
+    for (const c of [...treeNode.children.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (c.children.size === 0) items.push({ kind: "pkg", id: c.pkgId, key: c.name });
+      else items.push({ kind: "box", label: c.name, key: c.name, sub: layout(c, false, depth + 1) });
+    }
+    for (const it of items) {
+      if (it.kind === "pkg") { it.w = pkgW(it.id); it.h = NODE_H; it.key = it.key || pkgLabel(it.id); }
+      else { it.w = it.sub.w; it.h = it.sub.h; }
+    }
+
+    // Map every descendant package to the item that represents it here.
+    const itemOf = new Map();
+    const pkgIds = [];
+    items.forEach((it, i) => {
+      const ids = it.kind === "pkg" ? [it.id] : it.sub.pkgIds;
+      for (const id of ids) { itemOf.set(id, i); pkgIds.push(id); }
+    });
+
+    // Longest-path layering over edges between distinct items.
+    const n = items.length;
+    const adj = Array.from({ length: n }, () => new Set());
+    const indeg = new Array(n).fill(0);
+    for (const e of g.edges) {
+      const a = itemOf.get(e.from), b = itemOf.get(e.to);
+      if (a === undefined || b === undefined || a === b || adj[a].has(b)) continue;
+      adj[a].add(b); indeg[b]++;
+    }
+    const level = new Array(n).fill(0);
+    const q = [];
+    for (let i = 0; i < n; i++) if (indeg[i] === 0) q.push(i);
+    while (q.length) {
+      const cur = q.shift();
+      for (const nb of adj[cur]) {
+        if (level[cur] + 1 > level[nb]) level[nb] = level[cur] + 1;
+        if (--indeg[nb] === 0) q.push(nb);
+      }
+    }
+
+    const byLevel = new Map();
+    items.forEach((it, i) => (byLevel.get(level[i]) || byLevel.set(level[i], []).get(level[i])).push(it));
+    const levels = [...byLevel.keys()].sort((a, b) => a - b);
+    for (const lv of levels) byLevel.get(lv).sort((a, b) => a.key.localeCompare(b.key));
+
+    const pad = isRoot ? 0 : BOX_PAD;
+    const head = isRoot ? 0 : BOX_HEAD;
+    const rowH = levels.map(lv => Math.max(...byLevel.get(lv).map(it => it.h)));
+    const rowW = levels.map(lv => byLevel.get(lv).reduce((s, it) => s + it.w + COL_GAP, -COL_GAP));
+    let contentW = Math.max(0, ...rowW);
+    if (!isRoot) contentW = Math.max(contentW, treeNode.name.length * LABEL_CW + 20);
+
+    let cy = head;
+    levels.forEach((lv, ri) => {
+      let cx = pad + (contentW - rowW[ri]) / 2;
+      for (const it of byLevel.get(lv)) {
+        it.rx = cx;
+        it.ry = cy + (rowH[ri] - it.h) / 2;
+        cx += it.w + COL_GAP;
+      }
+      cy += rowH[ri] + ROW_GAP;
+    });
+    const w = contentW + pad * 2;
+    const h = cy - ROW_GAP + pad;
+
+    function place(x, y, color) {
+      for (const it of items) {
+        if (it.kind === "pkg") {
+          const nd = byId.get(it.id);
+          nd._x = x + it.rx; nd._y = y + it.ry; nd._w = it.w; nd._cx = nd._x + it.w / 2;
+        } else {
+          const c = depth === 0 ? topColor.get(it.label) : color;
+          boxDraws.push({ x: x + it.rx, y: y + it.ry, w: it.sub.w, h: it.sub.h, label: it.label, depth: depth + 1, color: c });
+          it.sub.place(x + it.rx, y + it.ry, c);
+        }
+      }
+    }
+    return { w, h, pkgIds, place };
+  }
+
+  const proj = layout(tree, true, 0);
+  proj.place(GAP_ROOT, MARGIN_TOP, null);
+  const projRight = GAP_ROOT + proj.w;
+  const projBottom = MARGIN_TOP + proj.h;
+
+  // Libraries box on the right (optional). Ordered so each lib sits near the
+  // mean height of the packages importing it (fewer crossing edges).
+  const libById = new Map(g.libs.map(l => [l.id, l]));
+  let libBox = null;
+  if (showLibs && g.libs.length) {
+    for (const l of g.libs) l._w = Math.max(90, l.label.length * CHAR_W + PAD_X * 2);
+    const libW = Math.max(...g.libs.map(l => l._w));
+    const boxX = projRight + LIB_GAP;
+    const ys = new Map(g.libs.map(l => [l.id, []]));
+    for (const e of g.libEdges) {
+      const a = byId.get(e.from);
+      if (a && ys.has(e.to)) ys.get(e.to).push(a._y);
+    }
+    const meanY = id => { const a = ys.get(id); return a.length ? a.reduce((s, v) => s + v, 0) / a.length : Infinity; };
+    [...g.libs].sort((p, q) => meanY(p.id) - meanY(q.id) || p.label.localeCompare(q.label)).forEach((l, i) => {
+      l._x = boxX + LIB_PAD;
+      l._w = libW;
+      l._y = MARGIN_TOP + LIB_HEAD + i * (NODE_H + LIB_VGAP);
+      l._cx = l._x + libW / 2;
+    });
+    const boxH = LIB_HEAD + g.libs.length * (NODE_H + LIB_VGAP) - LIB_VGAP + LIB_PAD;
+    libBox = { x: boxX, y: MARGIN_TOP, w: LIB_PAD * 2 + libW, h: boxH };
+  }
+
+  const canvasW = (libBox ? libBox.x + libBox.w : projRight) + MARGIN;
+  const canvasH = Math.max(projBottom, libBox ? libBox.y + libBox.h : 0) + MARGIN;
+
+  document.getElementById("stats").textContent =
+    `${g.nodes.length} packages · ${topBoxes.length} groups · ${g.libs.length} libraries`;
+
+  const svg = document.getElementById("svg");
+  svg.setAttribute("width", canvasW);
+  svg.setAttribute("height", canvasH);
+  svg.setAttribute("viewBox", `0 0 ${canvasW} ${canvasH}`);
+  svg.innerHTML = "";
+
+  const defs = el("defs");
+  defs.innerHTML =
+    `<marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+       <path d="M0,0 L7,3 L0,6 Z" fill="#5b6b82"/></marker>
+     <marker id="arrow-hi" markerWidth="10" markerHeight="10" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+       <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#6ea8fe"/></marker>`;
+  svg.appendChild(defs);
+
+  // Folder boxes (outer first so nested boxes sit on top). Deeper boxes are
+  // slightly more opaque so the nesting reads.
+  for (const b of boxDraws) {
+    const fo = Math.min(0.05 + 0.045 * (b.depth - 1), 0.22);
+    const so = Math.min(0.3 + 0.12 * (b.depth - 1), 0.7);
+    svg.appendChild(el("rect", {
+      class: "box-bg", x: b.x, y: b.y, width: b.w, height: b.h, rx: 10,
+      fill: b.color, "fill-opacity": fo, stroke: b.color, "stroke-opacity": so,
+    }));
+    const lbl = el("text", { class: "box-label", x: b.x + 12, y: b.y + 19, fill: b.color });
+    lbl.textContent = b.label;
+    svg.appendChild(lbl);
+  }
+
+  // Libraries box.
+  if (libBox) {
+    svg.appendChild(el("rect", {
+      class: "box-bg", x: libBox.x, y: libBox.y, width: libBox.w, height: libBox.h, rx: 10,
+      fill: LIB_COLOR, "fill-opacity": 0.05, stroke: LIB_COLOR, "stroke-opacity": 0.35,
+    }));
+    const lbl = el("text", { class: "box-label", x: libBox.x + 14, y: libBox.y + 24, fill: LIB_COLOR });
+    lbl.textContent = "libraries";
+    svg.appendChild(lbl);
+  }
+
+  // Give each target a distinct landing point per incoming edge: 1 lands
+  // dead-centre on the top edge, N spread evenly across it. Incoming edges are
+  // ordered by their source's x so left sources take the left slots.
+  const drawn = g.edges.map(e => ({ e, a: byId.get(e.from), b: byId.get(e.to) })).filter(x => x.a && x.b);
+  drawn.forEach(x => (x.cross = topFolder(x.a.id) !== topFolder(x.b.id)));
+  const incoming = new Map();
+  for (const x of drawn) (incoming.get(x.b.id) || incoming.set(x.b.id, []).get(x.b.id)).push(x);
+  for (const [, list] of incoming) {
+    list.sort((p, q) => p.a._cx - q.a._cx || p.a.id.localeCompare(q.a.id));
+    const n = list.length;
+    list.forEach((x, i) => { x.landX = x.b._x + x.b._w * (0.5 + PORT_INSET * ((i + 1) / (n + 1) - 0.5)); });
+  }
+
+  // Project edges: source bottom centre -> target's landing point on its top.
+  const edgeEls = [];
+  for (const x of drawn) {
+    const x1 = x.a._cx, y1 = x.a._y + NODE_H, x2 = x.landX, y2 = x.b._y, my = (y1 + y2) / 2;
+    const path = el("path", {
+      class: "edge" + (x.cross ? " cross" : ""),
+      d: `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`,
+      "marker-end": "url(#arrow)",
+    });
+    path._from = x.e.from; path._to = x.e.to;
+    edgeEls.push(path); svg.appendChild(path);
+  }
+
+  // Library edges: package right side -> lib left side.
+  if (libBox) {
+    for (const e of g.libEdges) {
+      const a = byId.get(e.from), l = libById.get(e.to);
+      if (!a || !l) continue;
+      const x1 = a._x + a._w, y1 = a._y + NODE_H / 2, x2 = l._x, y2 = l._y + NODE_H / 2, mx = (x1 + x2) / 2;
+      const path = el("path", {
+        class: "edge lib",
+        d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`,
+        "marker-end": "url(#arrow)",
+      });
+      path._from = e.from; path._to = e.to;
+      edgeEls.push(path); svg.appendChild(path);
+    }
+  }
+
+  const nodeEls = new Map();
+  const addNode = (id, label, cls, titleText) => {
+    const nd = byId.get(id) || libById.get(id);
+    const gEl = el("g", { class: cls });
+    gEl.appendChild(el("rect", { x: nd._x, y: nd._y, width: nd._w, height: NODE_H, rx: 7 }));
+    const t = el("text", { x: nd._cx, y: nd._y + NODE_H / 2 });
+    t.textContent = label;
+    gEl.appendChild(t);
+    const title = el("title"); title.textContent = titleText; gEl.appendChild(title);
+    gEl.addEventListener("mouseenter", () => highlight(id));
+    gEl.addEventListener("mouseleave", clear);
+    svg.appendChild(gEl);
+    nodeEls.set(id, gEl);
+  };
+  for (const n of g.nodes) addNode(n.id, pkgLabel(n.id), "node" + (hasIn.has(n.id) ? "" : " root"), n.pkg);
+  if (libBox) for (const l of g.libs) addNode(l.id, l.label, "node lib", l.id);
+
+  // Adjacency for hover highlighting.
+  const neighbors = new Map();
+  const add = (k, v) => (neighbors.get(k) || neighbors.set(k, new Set()).get(k)).add(v);
+  for (const e of g.edges) { add(e.from, e.to); add(e.to, e.from); }
+  if (libBox) for (const e of g.libEdges) { add(e.from, e.to); add(e.to, e.from); }
+
+  function highlight(id) {
+    const keep = new Set(neighbors.get(id) || []);
+    keep.add(id);
+    nodeEls.forEach((el, nid) => {
+      el.classList.toggle("dim", !keep.has(nid));
+      el.classList.toggle("hi", nid === id);
+    });
+    for (const p of edgeEls) {
+      const touches = p._from === id || p._to === id;
+      p.classList.toggle("hi", touches);
+      p.classList.toggle("dim", !touches);
+      p.setAttribute("marker-end", touches ? "url(#arrow-hi)" : "url(#arrow)");
+    }
+  }
+  function clear() {
+    nodeEls.forEach(el => el.classList.remove("dim", "hi"));
+    for (const p of edgeEls) {
+      p.classList.remove("hi", "dim");
+      p.setAttribute("marker-end", "url(#arrow)");
+    }
+  }
+}
+
+document.getElementById("showLibs").addEventListener("change", () => { if (currentGraph) render(currentGraph); });
+
+fetch("graph.json")
+  .then(r => { if (!r.ok) throw new Error("graph.json: " + r.status); return r.json(); })
+  .then(g => { currentGraph = g; render(g); })
+  .catch(err => { document.getElementById("err").textContent = String(err); });
+</script>
+</body>
+</html>

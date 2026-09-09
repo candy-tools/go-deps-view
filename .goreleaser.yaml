@@ -1,0 +1,103 @@
+version: 2
+before:
+  hooks:
+    - go mod tidy
+builds:
+  # =====================================================================================
+  # single pure-Go build for linux + darwin (shells out to `go list`; no CGO)
+  # =====================================================================================
+  - id: go-deps-view
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/candy-tools/go-deps-view/app/metainfo.Version={{.Version}}
+      - -X github.com/candy-tools/go-deps-view/app/metainfo.BuildTime={{.Date}}
+      - -X github.com/candy-tools/go-deps-view/app/metainfo.ShaVer={{.Commit}}
+    binary: go-deps-view
+
+archives:
+  - formats: [tar.gz]
+    # this name template makes the OS and Arch compatible with the results of uname.
+    name_template: >-
+      go-deps-view_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+
+nfpms:
+  # build a .deb for linux. go-deps-view shells out to the Go toolchain at
+  # runtime, but that is the audience's existing dev setup, so it is not declared
+  # as a hard package dependency. only linux builds are packaged; the darwin
+  # binaries are skipped automatically.
+  - id: go-deps-view
+    package_name: go-deps-view
+    ids:
+      - go-deps-view
+    formats:
+      - deb
+    maintainer: "Andres Bott <contact@andresbott.com>"
+    homepage: "https://github.com/candy-tools/go-deps-view"
+    description: "Browser viewer for a Go module's package dependency graph"
+    license: "GPL-3.0"
+    section: devel
+    priority: optional
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/go-deps-view/copyright
+    deb:
+      # the go binary is statically linked (CGO_ENABLED=0); silence lintian.
+      lintian_overrides:
+        - statically-linked-binary
+
+homebrew_casks:
+  # publish a macOS cask into the dedicated tap repo (candy-tools/homebrew-tap,
+  # Casks/go-deps-view.rb). pushing to a *different* repo needs a cross-repo PAT;
+  # the default GITHUB_TOKEN is scoped to this repo only. see
+  # HOMEBREW_TAP_GITHUB_TOKEN in .github/workflows/release.yml.
+  - name: go-deps-view
+    binaries:
+      - go-deps-view
+    repository:
+      owner: candy-tools
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    commit_author:
+      name: Andres Bott
+      email: contact@andresbott.com
+    homepage: "https://github.com/candy-tools/go-deps-view"
+    description: "Browser viewer for a Go module's package dependency graph"
+    # the darwin binary isn't code-signed/notarized, so strip the Gatekeeper
+    # quarantine attribute on install to avoid a "go-deps-view is damaged" error.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/go-deps-view"]
+          end
+
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
