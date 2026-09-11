@@ -36,3 +36,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # cross-repo PAT so goreleaser can push the cask to candy-tools/homebrew-tap
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      # publish to the APT repo. goreleaser has just written the .deb files into
+      # dist/; this action writes packages/go-deps-view.json in
+      # candy-tools/debian-repo and pushes it, which triggers that repo's publish.
+      # needs a cross-repo PAT with Contents: read/write on candy-tools/debian-repo.
+      - name: Register with debian-repo
+        uses: candy-tools/debian-repo/.github/actions/register@main
+        with:
+          name: go-deps-view          # must match the .deb's Package field
+          dist-dir: dist              # where goreleaser wrote the .deb files
+          token: ${{ secrets.DEBIAN_REPO_TOKEN }}
