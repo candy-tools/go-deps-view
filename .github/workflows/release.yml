@@ -37,13 +37,30 @@ jobs:
           # cross-repo PAT so goreleaser can push the cask to candy-tools/homebrew-tap
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
-      # publish to the APT repo. goreleaser has just written the .deb files into
-      # dist/; this action writes packages/go-deps-view.json in
-      # candy-tools/debian-repo and pushes it, which triggers that repo's publish.
-      # needs a cross-repo PAT with Contents: read/write on candy-tools/debian-repo.
-      - name: Register with debian-repo
-        uses: candy-tools/debian-repo/.github/actions/register@main
+      # hand the .deb files goreleaser has just written into dist/ to the apt job
+      # below. only the .debs: dist/ also holds the binaries and archives, and a
+      # flat artifact means "every release" of the APT repo.
+      - name: Upload the .debs for the APT repo
+        uses: actions/upload-artifact@v4
         with:
-          name: go-deps-view          # must match the .deb's Package field
-          dist-dir: dist              # where goreleaser wrote the .deb files
-          token: ${{ secrets.DEBIAN_REPO_TOKEN }}
+          name: debs
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # publish to the APT repo. the gh-action-debian-repo engine writes
+  # packages/go-deps-view.json in candy-tools/debian-repo and pushes it, which
+  # triggers that repo's publish. authenticates as the candy-tools GitHub App
+  # (org variable APT_APP_ID + secret APT_APP_PRIVATE_KEY), which mints a
+  # short-lived token scoped to debian-repo.
+  apt:
+    needs: release
+    permissions:
+      contents: read
+    uses: andresbott/gh-action-debian-repo/.github/workflows/publish.yml@v1.0.0-rc.2
+    with:
+      name: go-deps-view          # must match the .deb's Package field
+      artifact: debs
+      collection: candy-tools/debian-repo
+      app-id: ${{ vars.APT_APP_ID }}
+    secrets:
+      app-private-key: ${{ secrets.APT_APP_PRIVATE_KEY }}
