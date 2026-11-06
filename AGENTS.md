@@ -21,7 +21,9 @@ matches your task:
    dropped.
 3. Serve a single, dependency-free HTML viewer (embedded in the binary) plus the
    graph JSON, which is rebuilt from the module on every request. All folder nesting
-   and layering is derived by the viewer from the package paths.
+   and layering is derived by the viewer from the package paths, and an optional
+   `.go-deps-view.config` (YAML) in the scanned directory can define named top-to-bottom
+   layers and an info text per package or library.
 
 ## Ground rules that follow
 

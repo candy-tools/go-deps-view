@@ -11,6 +11,9 @@
     --line: #3a4657;
     --line-cross: #5b6b82;
     --line-hi: #6ea8fe;
+    --line-in: #f2836b;
+    --layer-band: #171c23;
+    --layer-line: #56647a;
     --text: #e6e9ee;
     --muted: #8a94a3;
     --node: #1e2530;
@@ -21,6 +24,7 @@
     --accent: #6ea8fe;
     --lib: #d8a657;
     --lib-line: #7a6a44;
+    --pinned: #453714;
   }
   * { box-sizing: border-box; }
   body {
@@ -52,6 +56,7 @@
     cursor: pointer;
     user-select: none;
   }
+  .toggle + .toggle { margin-left: 0; }
   .toggle input { accent-color: var(--lib); }
   .btn {
     font: inherit;
@@ -66,16 +71,25 @@
   .btn:hover:not(:disabled) { color: var(--text); border-color: var(--line-hi); }
   .btn:disabled { opacity: 0.45; cursor: default; }
   header .stats { color: var(--muted); font-size: 12px; }
+  .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .legend i { width: 14px; height: 3px; border-radius: 2px; background: var(--line-hi); }
+  .legend i.in { margin-left: 6px; background: var(--line-in); }
   #wrap { width: 100%; height: calc(100vh - 49px); overflow: auto; }
-  svg { display: block; }
+  /* At least the window's size, so layer bands reach its edges on a small graph. */
+  svg { display: block; user-select: none; min-width: 100%; min-height: 100%; }
 
-  .box-bg { stroke-width: 1; }
+  /* Drag handles: boxes move with their contents, nodes move on their own. */
+  .box-bg { stroke-width: 1; cursor: grab; touch-action: none; }
+  .node { touch-action: none; cursor: pointer; }
+  body.dragging, body.dragging * { cursor: grabbing !important; }
+
   .box-label {
     font-family: ui-monospace, monospace;
     font-weight: 700;
     font-size: 13px;
     text-anchor: start;
     letter-spacing: .03em;
+    pointer-events: none;
   }
 
   .edge {
@@ -83,11 +97,19 @@
     stroke: var(--line);
     stroke-width: 1.5;
     transition: stroke .12s, opacity .12s;
+    pointer-events: none;
   }
   .edge.cross { stroke: var(--line-cross); stroke-width: 1.7; }
+  .edge.implied { stroke-dasharray: 4 4; }
   .edge.lib { stroke: var(--lib-line); }
   .edge.hi { stroke: var(--line-hi); stroke-width: 2.4; }
+  .edge.hi.in { stroke: var(--line-in); } /* points at the highlighted node: something importing it */
   .edge.dim { opacity: 0.1; }
+
+  /* Quiet by default: library arrows and imports already implied by a longer path
+     only appear for the node being hovered or highlighted. */
+  .edge.lib:not(.hi),
+  body:not(.show-implied) .edge.implied:not(.hi) { opacity: 0; }
 
   .node rect {
     fill: var(--node);
@@ -103,13 +125,15 @@
     text-anchor: middle;
     pointer-events: none;
   }
-  .node.root rect { stroke: var(--accent); stroke-width: 2; }
+  .node.entry rect { stroke: var(--accent); stroke-width: 2; }
   .node.lib rect { stroke: var(--lib); }
   .node:hover rect, .node.hi rect { fill: var(--node-hi); stroke: var(--line-hi); }
+  /* Amber, not hover's blue: a clicked node sits under the pointer, so the two have
+     to look different for the click to show. */
+  .node.pinned rect { fill: var(--pinned); stroke: var(--lib); stroke-width: 2.5; }
   .node.dim { opacity: 0.2; }
 
-  /* Toggled-off packages: greyed in place, with every edge touching them hidden. */
-  .node:not(.lib) { cursor: pointer; }
+  /* Toggled-off nodes: greyed in place, with every edge touching them hidden. */
   .node.off { opacity: 0.5; }
   .node.off rect,
   .node.off:hover rect,
@@ -121,32 +145,92 @@
   .node.off text { fill: var(--muted); }
   .edge.off { display: none; }
 
-  #err { padding: 24px; color: #ff8f8f; font-family: ui-monospace, monospace; }
+  /* The info button: a circle, so the node's rect styles don't reach it. */
+  .info-btn { cursor: pointer; }
+  .info-btn circle { fill: transparent; stroke: var(--muted); transition: stroke .12s; } /* transparent, not none, so the middle takes clicks */
+  .info-btn text { fill: var(--muted); font-weight: 700; font-style: italic; }
+  .info-btn:hover circle, .info-btn:focus-visible circle { fill: var(--accent); stroke: var(--accent); }
+  .info-btn:hover text, .info-btn:focus-visible text { fill: var(--bg); }
+  .info-btn:focus { outline: none; }
+
+  #info { width: min(520px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  #info::backdrop { background: rgb(0 0 0 / 0.5); }
+  #info .info-body { padding: 16px 18px; }
+  #info h2 { margin: 0 0 10px; font: 700 13px ui-monospace, monospace; overflow-wrap: anywhere; }
+  #info p { margin: 0 0 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #info form { text-align: right; }
+
+  /* Layers: alternating bands behind the graph with a solid line between them,
+     labelled over the arrows. The label's halo matches the band it sits on. */
+  .layer-band { fill: var(--layer-band); pointer-events: none; }
+  .layer-line { stroke: var(--layer-line); stroke-width: 1.5; pointer-events: none; }
+  .layer-label {
+    fill: var(--muted);
+    font-size: 12px;
+    paint-order: stroke;
+    stroke: var(--bg);
+    stroke-width: 4px;
+    pointer-events: none;
+  }
+  .layer-label.alt { stroke: var(--layer-band); }
+  .layer-label .layer-name { fill: var(--text); font-size: 14px; font-weight: 700; }
+  .layer-toggle { cursor: pointer; }
+  .layer-toggle:focus { outline: none; }
+  .layer-toggle rect { fill: var(--node); stroke: var(--node-border); transition: stroke .12s; }
+  .layer-toggle text { fill: var(--muted); font-size: 11px; dominant-baseline: middle; text-anchor: middle; pointer-events: none; }
+  .layer-toggle:hover rect, .layer-toggle:focus-visible rect { stroke: var(--line-hi); }
+  .layer-toggle:hover text, .layer-toggle:focus-visible text, .layer-toggle.off text { fill: var(--text); }
+  .layer-toggle.off rect { stroke: var(--lib); }
+
+  #err { padding: 24px; color: #ff8f8f; font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  #err:empty { display: none; }
 </style>
 </head>
 <body>
   <header>
     <h1>package dependency graph</h1>
     <span class="mod" id="module"></span>
+    <label class="toggle"><input type="checkbox" id="showImplied"> transitive imports</label>
     <label class="toggle"><input type="checkbox" id="showLibs" checked> external libraries</label>
     <button type="button" class="btn" id="hideAll">hide all</button>
     <button type="button" class="btn" id="showAll" disabled>show all</button>
+    <span class="legend" title="Arrow colours on a highlighted node"><i></i>imports<i class="in"></i>imported by</span>
     <span class="stats" id="stats"></span>
   </header>
-  <div id="wrap"><svg id="svg"></svg></div>
   <div id="err"></div>
+  <div id="wrap"><svg id="svg"></svg></div>
+  <dialog id="info" aria-labelledby="infoTitle">
+    <div class="info-body">
+      <h2 id="infoTitle"></h2>
+      <p id="infoText"></p>
+      <form method="dialog"><button class="btn">close</button></form>
+    </div>
+  </dialog>
 
 <script>
 const NS = "http://www.w3.org/2000/svg";
 // Layout constants.
-const COL_GAP = 68, ROW_GAP = 66, NODE_H = 38, PAD_X = 14;
-const BOX_PAD = 22, BOX_HEAD = 30, GAP_ROOT = 24; // left/top offset of the diagram
+const COL_GAP = 44, ROW_GAP = 46, NODE_H = 38, PAD_X = 14;
+const BOX_PAD = 16, BOX_HEAD = 28, GAP_ROOT = 24; // left offset of the diagram
 const MARGIN_TOP = 30, MARGIN = 48;
-const CHAR_W = 7.3;             // approx monospace node-label width at 12px
+// Layers: extra space at a boundary, the line's height above the layer's content,
+// and the label's baseline above that content.
+const LAYER_GAP = 14, LAYER_HEAD = 36, LAYER_LABEL_UP = 10;
+const LAYER_BTN_W = 40, LAYER_BTN_H = 18, LAYER_BTN_GAP = 8; // the hide/show button left of the label
+const CHAR_W = 7.3;            // approx monospace node-label width at 12px
 const LABEL_CW = 8;             // approx box-label width at 13px bold
-const PORT_INSET = 0.7;         // fraction of node width incoming arrows spread across
+const PORT_INSET = 0.7;         // fraction of node width arrows spread across
+const INFO_W = 20;              // extra node width holding the info button
+const nodeWidth = (label, info, min) => Math.max(min, label.length * CHAR_W + PAD_X * 2 + (info ? INFO_W : 0));
+// Routing: clearance around packages, spacing of arrows sharing a gap, and the
+// horizontal detour (px) worth taking to stay out of an unrelated folder.
+const GAP_MARGIN = 7, CHANNEL = 7, BOX_PENALTY = 220;
+const CURVE_STEP = 12;          // px between the samples that check a curve is clear
 // Libraries box (external deps) on the right.
-const LIB_GAP = 110, LIB_PAD = 16, LIB_HEAD = 40, LIB_VGAP = 14, LIB_COLOR = "#d8a657";
+const LIB_GAP = 90, LIB_PAD = 16, LIB_HEAD = 36, LIB_VGAP = 12, LIB_COLOR = "#d8a657";
+// Dragging: pixels of movement before a press counts as a drag rather than a
+// click, and how close to the canvas's top/left edge anything may be dropped.
+const DRAG_MIN = 4, EDGE_MIN = 6;
 // Box accent colours, assigned by top-level folder order (cycles for large trees).
 const PALETTE = ["#6ea8fe", "#63d29a", "#b48ef2", "#e0a458", "#4fd0d6", "#e879b0", "#9db4ff"];
 const groupColor = i => PALETTE[i % PALETTE.length];
@@ -157,19 +241,18 @@ function el(name, attrs) {
   return e;
 }
 
-const pkgLabel = id => id === "." ? "main" : id.split("/").pop();
 const topFolder = id => id === "." ? "" : id.replace(/^\.\//, "").split("/")[0];
 
 // Build a folder tree from package ids. Each tree node is a directory; it may
 // carry a package (pkgId) and/or child directories.
 function buildTree(nodes) {
-  const root = { name: "", pkgId: null, children: new Map() };
+  const root = { name: "", path: ".", pkgId: null, children: new Map() };
   for (const n of nodes) {
     if (n.id === ".") { root.pkgId = "."; continue; }
     const segs = n.id.replace(/^\.\//, "").split("/");
     let cur = root;
     for (const s of segs) {
-      if (!cur.children.has(s)) cur.children.set(s, { name: s, pkgId: null, children: new Map() });
+      if (!cur.children.has(s)) cur.children.set(s, { name: s, path: cur.path + "/" + s, pkgId: null, children: new Map() });
       cur = cur.children.get(s);
     }
     cur.pkgId = n.id;
@@ -177,157 +260,548 @@ function buildTree(nodes) {
   return root;
 }
 
+// Strongly connected components (Tarjan) of a graph given as adjacency sets.
+// Components come out dependencies-first.
+function components(adj) {
+  const index = new Array(adj.length).fill(-1), low = [], onStack = [], stack = [], comps = [];
+  let next = 0;
+  const visit = v => {
+    index[v] = low[v] = next++;
+    stack.push(v);
+    onStack[v] = true;
+    for (const w of adj[v]) {
+      if (index[w] < 0) { visit(w); low[v] = Math.min(low[v], low[w]); }
+      else if (onStack[w]) low[v] = Math.min(low[v], index[w]);
+    }
+    if (low[v] !== index[v]) return;
+    const comp = [];
+    let w;
+    do { w = stack.pop(); onStack[w] = false; comp.push(w); } while (w !== v);
+    comps.push(comp);
+  };
+  adj.forEach((_, v) => { if (index[v] < 0) visit(v); });
+  return comps;
+}
+
+// Computes every package's home position. Rows come from the imports, so an
+// importer sits above what it imports unless the configured layers say otherwise;
+// columns are chosen to reduce crossings between the imports that carry structure.
+// Deterministic: the same graph always lays out the same way, however often it is
+// rebuilt.
+function layoutPackages(g) {
+  const byId = new Map(g.nodes.map(n => [n.id, n]));
+  const edges = g.edges.filter(e => byId.has(e.from) && byId.has(e.to));
+  const out = new Map(g.nodes.map(n => [n.id, []]));
+  for (const e of edges) out.get(e.from).push(e.to);
+
+  // An import also reachable through a longer path is real but adds no structure,
+  // so it neither shapes the layout nor gets drawn until asked for.
+  const reachableWithout = (from, to) => {
+    const seen = new Set(), stack = out.get(from).filter(x => x !== to);
+    while (stack.length) {
+      const x = stack.pop();
+      if (x === to) return true;
+      if (seen.has(x)) continue;
+      seen.add(x);
+      stack.push(...out.get(x));
+    }
+    return false;
+  };
+  for (const e of edges) e.implied = reachableWithout(e.from, e.to);
+  const structural = edges.filter(e => !e.implied);
+
+  // Items: packages and folders. A folder holding a single package and nothing
+  // else adds no information, so it collapses into a label like "internal/store".
+  const pkgItem = (id, label) => {
+    const nd = byId.get(id);
+    nd._label = label;
+    nd._w = nodeWidth(label, nd.info, 70);
+    return { kind: "pkg", id, path: id, label, w: nd._w, ids: [id] };
+  };
+  const boxes = []; // children before their parents; the last one is the root
+  const toItem = (dir, prefix, depth) => {
+    const name = prefix + dir.name;
+    const kids = [...dir.children.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const isRoot = depth === 0;
+    if (!isRoot && !kids.length) return pkgItem(dir.pkgId, name);
+    if (!isRoot && !dir.pkgId && kids.length === 1) return toItem(kids[0], name + "/", depth);
+    const box = { kind: "box", path: dir.path, label: name, depth, isRoot, items: [] };
+    if (dir.pkgId) box.items.push(pkgItem(dir.pkgId, isRoot ? byId.get(".").name : dir.name));
+    for (const k of kids) box.items.push(toItem(k, "", depth + 1));
+    box.ids = box.items.flatMap(it => it.ids);
+    boxes.push(box);
+    return box;
+  };
+  const root = toItem(buildTree(g.nodes), "", 0);
+
+  // Configured layers, top first. An item takes the layer of its closest listed
+  // path, or the "*" layer, which defaults to below everything listed. Layers only
+  // order siblings, so a folder stays in one piece wherever its packages are listed.
+  const layerOfPath = new Map();
+  let restLayer = g.layers.length;
+  g.layers.forEach((layer, i) => layer.packages.forEach(entry => {
+    if (entry === "*") restLayer = i;
+    else layerOfPath.set(entry, i);
+  }));
+  const layerOf = path => {
+    if (layerOfPath.has(path)) return layerOfPath.get(path);
+    const cut = path.lastIndexOf("/");
+    return cut > 1 ? layerOf(path.slice(0, cut)) : restLayer;
+  };
+
+  // Rows. Inside each folder, items are layered by the imports between them, so
+  // a folder stacks as one compact block. Items that import each other both ways
+  // (possible for folders, whose packages may point in both directions) can't be
+  // stacked: they share a band, side by side, with their packages interleaved by
+  // the package-level imports, which Go guarantees are acyclic.
+  const rowOf = new Map();
+  const widthCap = Math.max(1200, 272 * Math.sqrt(g.nodes.length));
+  function tangledGroup(items) {
+    const ids = new Set(items.flatMap(it => it.ids));
+    const rows = new Map();
+    const rowIn = id => {
+      if (rows.has(id)) return rows.get(id);
+      const r = Math.max(-1, ...out.get(id).filter(d => ids.has(d)).map(rowIn)) + 1;
+      rows.set(id, r);
+      return r;
+    };
+    ids.forEach(rowIn);
+    for (const it of items) it.bandRows = rows;
+    return {
+      items,
+      rowsH: Math.max(...rows.values()) + 1,
+      estW: items.reduce((s, it) => s + it.estW + COL_GAP, -COL_GAP),
+    };
+  }
+  function assignRows(box) {
+    const itemOf = new Map();
+    box.items.forEach((it, i) => {
+      if (it.kind === "box") assignRows(it);
+      else { it.rowsH = 1; it.estW = it.w; }
+      for (const id of it.ids) itemOf.set(id, i);
+    });
+    // Imports only order items within a configured layer; the layers stack on top.
+    const configured = box.items.map(it => layerOf(it.path));
+    const adj = box.items.map(() => new Set());
+    for (const e of edges) {
+      const a = itemOf.get(e.from), b = itemOf.get(e.to);
+      if (a !== undefined && b !== undefined && a !== b && configured[a] === configured[b]) adj[a].add(b);
+    }
+    const comps = components(adj);
+    const compOf = [], levelOf = [];
+    comps.forEach((c, ci) => c.forEach(i => { compOf[i] = ci; }));
+    const byLevel = new Map();
+    comps.forEach((members, ci) => {
+      let level = 0;
+      for (const i of members) for (const j of adj[i]) {
+        if (compOf[j] !== ci) level = Math.max(level, levelOf[compOf[j]] + 1);
+      }
+      levelOf[ci] = level;
+      const items = members.map(i => box.items[i]);
+      const group = items.length > 1 ? tangledGroup(items) : { items, rowsH: items[0].rowsH, estW: items[0].estW };
+      group.key = items.map(it => it.label).sort()[0];
+      const stacked = (g.layers.length - configured[members[0]]) * (box.items.length + 1) + level;
+      (byLevel.get(stacked) || byLevel.set(stacked, []).get(stacked)).push(group);
+    });
+    // A level too wide for the target wraps onto more rows, which is always safe:
+    // nothing in one level imports anything else in it.
+    let height = 0, maxW = 0;
+    for (const level of [...byLevel.keys()].sort((a, b) => a - b)) {
+      let row = [], rowW = 0;
+      const flush = () => {
+        for (const group of row) for (const it of group.items) it.relRow = height;
+        height += Math.max(0, ...row.map(group => group.rowsH));
+        maxW = Math.max(maxW, rowW);
+        row = [];
+        rowW = 0;
+      };
+      for (const group of byLevel.get(level).sort((a, b) => a.key.localeCompare(b.key))) {
+        if (row.length && rowW + COL_GAP + group.estW > widthCap) flush();
+        rowW += group.estW + (row.length ? COL_GAP : 0);
+        row.push(group);
+      }
+      flush();
+    }
+    box.rowsH = height;
+    box.estW = maxW + (box.isRoot ? 0 : BOX_PAD * 2);
+  }
+  function applyRows(box, base) {
+    for (const it of box.items) {
+      const at = base + it.relRow;
+      if (it.bandRows) for (const id of it.ids) rowOf.set(id, at + it.bandRows.get(id));
+      else if (it.kind === "pkg") rowOf.set(it.id, at);
+      else applyRows(it, at);
+    }
+  }
+  assignRows(root);
+  applyRows(root, 0);
+
+  // Each item's row range, and how many box borders open or close on those rows.
+  (function measureRows(it) {
+    if (it.kind === "pkg") { it.lo = it.hi = rowOf.get(it.id); return; }
+    it.items.forEach(measureRows);
+    it.lo = Math.min(...it.items.map(c => c.lo));
+    it.hi = Math.max(...it.items.map(c => c.hi));
+    const kids = it.items.filter(c => c.kind === "box");
+    it.headCount = it.isRoot ? 0 : 1 + Math.max(0, ...kids.filter(c => c.hi === it.hi).map(c => c.headCount));
+    it.footCount = it.isRoot ? 0 : 1 + Math.max(0, ...kids.filter(c => c.lo === it.lo).map(c => c.footCount));
+  })(root);
+
+  // Row heights leave just enough room for the box borders that need it.
+  const maxRow = Math.max(0, ...rowOf.values());
+  const head = new Array(maxRow + 1).fill(0), foot = new Array(maxRow + 1).fill(0);
+  for (const b of boxes) {
+    if (b.isRoot) continue;
+    head[b.hi] = Math.max(head[b.hi], b.headCount);
+    foot[b.lo] = Math.max(foot[b.lo], b.footCount);
+  }
+  // Each layer holding top-level items gets a band, topped by its highest row. Layers
+  // listing only nested paths have no band of their own to mark. Boundaries get extra
+  // room for the line and label; the top row never starts one, so a graph without
+  // layers lays out exactly as it would otherwise.
+  const layerTop = new Map();
+  for (const it of root.items) {
+    const i = layerOf(it.path);
+    layerTop.set(i, Math.max(layerTop.get(i) ?? -1, it.hi));
+  }
+  const layerStarts = new Set(layerTop.values());
+  const rowY = new Array(maxRow + 1);
+  let y = MARGIN_TOP + head[maxRow] * BOX_HEAD;
+  for (let r = maxRow; r >= 0; r--) {
+    rowY[r] = y;
+    if (r > 0) y += NODE_H + foot[r] * BOX_PAD + head[r - 1] * BOX_HEAD + ROW_GAP + (layerStarts.has(r - 1) ? LAYER_GAP : 0);
+  }
+  for (const n of g.nodes) n._homeY = rowY[rowOf.get(n.id)];
+
+  const dividers = !g.layers.length ? [] : [...layerTop]
+    .sort((p, q) => q[1] - p[1])
+    .map(([i, top], k) => {
+      const contentY = rowY[top] - head[top] * BOX_HEAD;
+      return {
+        layer: g.layers[i],
+        topY: k ? contentY - LAYER_HEAD : 0, // the first band starts at the canvas's edge
+        labelY: contentY - LAYER_LABEL_UP,
+        ids: g.nodes.filter(n => layerOf(n.id) === i).map(n => n.id), // may be outside this band, if nested
+      };
+    });
+
+  // Columns. Two siblings only need to avoid each other when their row ranges
+  // overlap; otherwise they may share x. So a sibling order gives a set of
+  // constraints: compact against them, then pull each item toward the median of
+  // its neighbours within its remaining slack. Items only ever permute inside
+  // their parent, so boxes can't overlap or split.
+  const centerX = nd => nd._x + nd._w / 2;
+  const overlaps = (a, b) => a.lo <= b.hi && b.lo <= a.hi;
+  const nbrsOf = new Map(g.nodes.map(n => [n.id, []]));
+  for (const e of structural) { nbrsOf.get(e.from).push(e.to); nbrsOf.get(e.to).push(e.from); }
+  (function indexNeighbours(it) {
+    const inside = new Set(it.ids);
+    it.nbrs = it.ids.flatMap(id => nbrsOf.get(id)).filter(id => !inside.has(id));
+    if (it.kind === "box") it.items.forEach(indexNeighbours);
+  })(root);
+  function measure(box) {
+    let contentW = 0;
+    box.items.forEach((it, i) => {
+      if (it.kind === "box") measure(it);
+      let x = 0;
+      for (let j = 0; j < i; j++) {
+        const o = box.items[j];
+        if (overlaps(o, it)) x = Math.max(x, o.rx + o.w + COL_GAP);
+      }
+      it.rx = x;
+      contentW = Math.max(contentW, x + it.w);
+    });
+    box.contentW = contentW;
+    box.w = box.isRoot ? contentW : Math.max(contentW, box.label.length * LABEL_CW + 20) + BOX_PAD * 2;
+  }
+  function place(box, x) {
+    box.x = x;
+    box.ox = x + (box.w - box.contentW) / 2;
+    for (const it of box.items) {
+      if (it.kind === "pkg") byId.get(it.id)._x = box.ox + it.rx;
+      else place(it, box.ox + it.rx);
+    }
+  }
+  const median = values => {
+    const s = [...values].sort((a, b) => a - b), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  function relax(sweeps) {
+    for (let s = 0; s < sweeps; s++) {
+      for (const box of boxes) {
+        box.items.forEach((it, i) => {
+          if (!it.nbrs.length) return;
+          let lo = 0, hi = box.contentW - it.w;
+          box.items.forEach((o, j) => {
+            if (j === i || !overlaps(o, it)) return;
+            if (j < i) lo = Math.max(lo, o.rx + o.w + COL_GAP);
+            else hi = Math.min(hi, o.rx - COL_GAP - it.w);
+          });
+          const want = median(it.nbrs.map(id => centerX(byId.get(id)))) - box.ox - it.w / 2;
+          it.rx = Math.max(lo, Math.min(hi, want));
+          place(box, box.x);
+        });
+      }
+    }
+  }
+  const relayout = sweeps => { measure(root); place(root, GAP_ROOT); relax(sweeps); };
+
+  // Ordering. Barycentre sweeps get stuck easily, so run them from many seeded
+  // shuffles, polish with adjacent swaps, and keep the order with the fewest
+  // crossings. The budget comes from the graph's size, never from a clock, so the
+  // result is the same every time.
+  for (const n of g.nodes) n._y = n._homeY;
+  const cross = (p, q, r, s) => {
+    const o = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    return o(p, q, r) * o(p, q, s) < 0 && o(r, s, p) * o(r, s, q) < 0;
+  };
+  function cost() {
+    const segs = structural.map(e => {
+      const a = byId.get(e.from), b = byId.get(e.to);
+      const [upper, lower] = a._y > b._y ? [b, a] : [a, b];
+      return { p: { x: centerX(upper), y: upper._y + NODE_H }, q: { x: centerX(lower), y: lower._y }, e };
+    });
+    let total = 0;
+    segs.forEach((s, i) => {
+      total += Math.abs(s.p.x - s.q.x) * 0.002; // tie-break toward shorter arrows
+      for (let j = i + 1; j < segs.length; j++) {
+        const t = segs[j];
+        if (s.e.from === t.e.from || s.e.to === t.e.to || s.e.from === t.e.to || s.e.to === t.e.from) continue;
+        if (cross(s.p, s.q, t.p, t.q)) total++;
+      }
+    });
+    return total;
+  }
+  // Packages importing libraries lean right, toward the libraries box.
+  const libUses = new Map();
+  for (const e of g.libEdges) libUses.set(e.from, (libUses.get(e.from) || 0) + 1);
+  const barycentre = it => {
+    const right = root.w + LIB_GAP;
+    let sum = 0, n = 0;
+    for (const id of it.nbrs) { sum += centerX(byId.get(id)); n++; }
+    for (const id of it.ids) { const k = libUses.get(id) || 0; sum += k * right; n += k; }
+    if (n) return sum / n;
+    return it.ids.reduce((s, id) => s + centerX(byId.get(id)), 0) / it.ids.length;
+  };
+  const snapshot = () => new Map(boxes.map(b => [b, [...b.items]]));
+  const restore = saved => { for (const [b, items] of saved) b.items = [...items]; };
+  let seed = 0x9e3779b9;
+  const rand = () => { // mulberry32
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const shuffle = a => {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+  };
+  const budget = Math.max(120, Math.min(4000, Math.floor(3e7 / Math.max(1, structural.length ** 2))));
+  let evals = 0, best = null, bestCost = Infinity;
+  const score = () => { evals++; relayout(2); return cost(); };
+  for (let start = 0; evals < budget; start++) {
+    if (start > 0) for (const b of boxes) shuffle(b.items);
+    let current = snapshot(), currentCost = score();
+    for (let sweep = 0; sweep < 6; sweep++) {
+      for (const b of boxes) {
+        const bary = new Map(b.items.map(it => [it, barycentre(it)]));
+        b.items.sort((p, q) => bary.get(p) - bary.get(q));
+        relayout(1);
+      }
+      const c = score();
+      if (c < currentCost) { currentCost = c; current = snapshot(); }
+    }
+    restore(current);
+    let improved = true;
+    while (improved && evals < budget) {
+      improved = false;
+      for (const b of boxes) {
+        for (let i = 0; i + 1 < b.items.length; i++) {
+          [b.items[i], b.items[i + 1]] = [b.items[i + 1], b.items[i]];
+          const c = score();
+          if (c < currentCost - 1e-9) { currentCost = c; improved = true; }
+          else [b.items[i], b.items[i + 1]] = [b.items[i + 1], b.items[i]];
+        }
+      }
+    }
+    if (currentCost < bestCost) { bestCost = currentCost; best = snapshot(); }
+  }
+  restore(best);
+  relayout(8);
+  for (const n of g.nodes) n._homeX = n._x;
+  return { root, right: GAP_ROOT + root.w, layerOf, dividers };
+}
+
 let currentGraph = null;
-const hidden = new Set(); // package ids toggled off by the user; persists across re-renders
+const hidden = new Set(); // package and library ids toggled off by the user; persists across re-renders
+const highlighted = new Set(); // package and library ids kept highlighted by the user; persists across re-renders
+const moved = new Map();  // node id -> {dx, dy} dragged away from its computed spot; persists across re-renders
+let justDragged = false;  // the press in progress became a drag, so its click must not toggle
+
+function showInfo(heading, text) {
+  document.getElementById("infoTitle").textContent = heading;
+  document.getElementById("infoText").textContent = text;
+  document.getElementById("info").showModal();
+}
+
+// The button at a node's right end. Its press must not reach the node: there it
+// would capture the pointer, which sends the click to the node and cycles it.
+function infoButton(nd, heading) {
+  const btn = el("g", { class: "info-btn", role: "button", tabindex: 0 });
+  btn.appendChild(el("circle", { cx: nd._w - INFO_W / 2 - 4, cy: NODE_H / 2, r: 8 }));
+  const t = el("text", { x: nd._w - INFO_W / 2 - 4, y: NODE_H / 2 });
+  t.textContent = "i";
+  btn.appendChild(t);
+  const title = el("title"); title.textContent = "About " + heading; btn.appendChild(title);
+  btn.addEventListener("pointerdown", ev => ev.stopPropagation());
+  btn.addEventListener("click", ev => { ev.stopPropagation(); showInfo(heading, nd.info); });
+  btn.addEventListener("keydown", ev => {
+    if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); showInfo(heading, nd.info); }
+  });
+  return btn;
+}
 
 function updateHiddenControl() {
-  const total = document.querySelectorAll("g.node:not(.lib)").length; // clickable packages
+  // "hide all" covers the packages; "show all" brings back libraries too.
+  const total = document.querySelectorAll("g.node:not(.lib)").length;
+  const off = document.querySelectorAll("g.node.off:not(.lib)").length;
   const showBtn = document.getElementById("showAll");
   showBtn.disabled = hidden.size === 0;
   showBtn.textContent = hidden.size ? `show all (${hidden.size})` : "show all";
-  document.getElementById("hideAll").disabled = total === 0 || hidden.size >= total;
+  document.getElementById("hideAll").disabled = total === 0 || off >= total;
 }
 
 function render(g) {
   const showLibs = document.getElementById("showLibs").checked;
   g.nodes = g.nodes || []; g.edges = g.edges || [];
   g.libs = g.libs || []; g.libEdges = g.libEdges || [];
+  g.layers = g.layers || [];
   document.getElementById("module").textContent = g.module;
   document.title = g.module + " · go-deps-view";
 
   const byId = new Map(g.nodes.map(n => [n.id, n]));
-  const hasIn = new Set(g.edges.map(e => e.to)); // roots (entrypoints) get no incoming edge
-  const pkgW = id => Math.max(70, pkgLabel(id).length * CHAR_W + PAD_X * 2);
+  // The layout is the expensive part and doesn't depend on any toggle, so it runs
+  // once per graph; re-renders start again from the home spots it computed.
+  const layout = g._layout || (g._layout = layoutPackages(g));
+  for (const n of g.nodes) { n._x = n._homeX; n._y = n._homeY; }
 
-  const tree = buildTree(g.nodes);
-  const topBoxes = [...tree.children.values()].filter(c => c.children.size).map(c => c.name).sort();
+  const topBoxes = layout.root.items.filter(it => it.kind === "box").map(it => it.label).sort();
   const topColor = new Map(topBoxes.map((nm, i) => [nm, groupColor(i)]));
 
-  const boxDraws = []; // {x,y,w,h,label,depth,color} filled during place()
+  const boxes = []; // every drawn box, parents before their children
+  const nodeRect = nd => ({ x: nd._x, y: nd._y, w: nd._w, h: NODE_H });
+  const centerX = nd => nd._x + nd._w / 2;
 
-  // Recursively lay out a tree node's contents into a layered box. Items are the
-  // node's own package (if any), its leaf-package children, and its sub-boxes;
-  // they are stacked into rows by a longest-path layering over the edges between
-  // them, so each folder reads as its own pyramid. Returns sizes + a place().
-  function layout(treeNode, isRoot, depth) {
-    const items = [];
-    if (treeNode.pkgId) items.push({ kind: "pkg", id: treeNode.pkgId });
-    for (const c of [...treeNode.children.values()].sort((a, b) => a.name.localeCompare(b.name))) {
-      if (c.children.size === 0) items.push({ kind: "pkg", id: c.pkgId, key: c.name });
-      else items.push({ kind: "box", label: c.name, key: c.name, sub: layout(c, false, depth + 1) });
-    }
-    for (const it of items) {
-      if (it.kind === "pkg") { it.w = pkgW(it.id); it.h = NODE_H; it.key = it.key || pkgLabel(it.id); }
-      else { it.w = it.sub.w; it.h = it.sub.h; }
-    }
-
-    // Map every descendant package to the item that represents it here.
-    const itemOf = new Map();
-    const pkgIds = [];
-    items.forEach((it, i) => {
-      const ids = it.kind === "pkg" ? [it.id] : it.sub.pkgIds;
-      for (const id of ids) { itemOf.set(id, i); pkgIds.push(id); }
-    });
-
-    // Longest-path layering over edges between distinct items.
-    const n = items.length;
-    const adj = Array.from({ length: n }, () => new Set());
-    const indeg = new Array(n).fill(0);
-    for (const e of g.edges) {
-      const a = itemOf.get(e.from), b = itemOf.get(e.to);
-      if (a === undefined || b === undefined || a === b || adj[a].has(b)) continue;
-      adj[a].add(b); indeg[b]++;
-    }
-    const level = new Array(n).fill(0);
-    const q = [];
-    for (let i = 0; i < n; i++) if (indeg[i] === 0) q.push(i);
-    while (q.length) {
-      const cur = q.shift();
-      for (const nb of adj[cur]) {
-        if (level[cur] + 1 > level[nb]) level[nb] = level[cur] + 1;
-        if (--indeg[nb] === 0) q.push(nb);
+  (function addBoxes(item, color, owner) {
+    for (const it of item.items) {
+      if (it.kind === "pkg") {
+        if (owner) owner.nodes.push(byId.get(it.id));
+        continue;
       }
+      const c = it.depth === 1 ? topColor.get(it.label) : color;
+      const nesting = it.depth - 1;
+      const box = {
+        label: it.label, color: c, labelX: 12, labelY: 19,
+        fillOpacity: Math.min(0.05 + 0.045 * nesting, 0.22),
+        strokeOpacity: Math.min(0.3 + 0.12 * nesting, 0.7),
+        pad: BOX_PAD, head: BOX_HEAD, minW: it.label.length * LABEL_CW + 20 + BOX_PAD * 2,
+        nodes: [], kids: [],
+        members: it.ids.map(id => byId.get(id)),
+        memberIds: new Set(it.ids),
+      };
+      boxes.push(box);
+      if (owner) owner.kids.push(box);
+      addBoxes(it, c, box);
     }
+  })(layout.root, null, null);
+  const folderBoxes = [...boxes];
 
-    const byLevel = new Map();
-    items.forEach((it, i) => (byLevel.get(level[i]) || byLevel.set(level[i], []).get(level[i])).push(it));
-    const levels = [...byLevel.keys()].sort((a, b) => a - b);
-    for (const lv of levels) byLevel.get(lv).sort((a, b) => a.key.localeCompare(b.key));
-
-    const pad = isRoot ? 0 : BOX_PAD;
-    const head = isRoot ? 0 : BOX_HEAD;
-    const rowH = levels.map(lv => Math.max(...byLevel.get(lv).map(it => it.h)));
-    const rowW = levels.map(lv => byLevel.get(lv).reduce((s, it) => s + it.w + COL_GAP, -COL_GAP));
-    let contentW = Math.max(0, ...rowW);
-    if (!isRoot) contentW = Math.max(contentW, treeNode.name.length * LABEL_CW + 20);
-
-    let cy = head;
-    levels.forEach((lv, ri) => {
-      let cx = pad + (contentW - rowW[ri]) / 2;
-      for (const it of byLevel.get(lv)) {
-        it.rx = cx;
-        it.ry = cy + (rowH[ri] - it.h) / 2;
-        cx += it.w + COL_GAP;
-      }
-      cy += rowH[ri] + ROW_GAP;
-    });
-    const w = contentW + pad * 2;
-    const h = cy - ROW_GAP + pad;
-
-    function place(x, y, color) {
-      for (const it of items) {
-        if (it.kind === "pkg") {
-          const nd = byId.get(it.id);
-          nd._x = x + it.rx; nd._y = y + it.ry; nd._w = it.w; nd._cx = nd._x + it.w / 2;
-        } else {
-          const c = depth === 0 ? topColor.get(it.label) : color;
-          boxDraws.push({ x: x + it.rx, y: y + it.ry, w: it.sub.w, h: it.sub.h, label: it.label, depth: depth + 1, color: c });
-          it.sub.place(x + it.rx, y + it.ry, c);
-        }
-      }
-    }
-    return { w, h, pkgIds, place };
-  }
-
-  const proj = layout(tree, true, 0);
-  proj.place(GAP_ROOT, MARGIN_TOP, null);
-  const projRight = GAP_ROOT + proj.w;
-  const projBottom = MARGIN_TOP + proj.h;
-
-  // Libraries box on the right (optional). Ordered so each lib sits near the
-  // mean height of the packages importing it (fewer crossing edges).
+  // Libraries box on the right (optional). Each lib sits level with the mean height
+  // of the packages importing it, pushed down only as far as needed to not overlap.
   const libById = new Map(g.libs.map(l => [l.id, l]));
   let libBox = null;
   if (showLibs && g.libs.length) {
-    for (const l of g.libs) l._w = Math.max(90, l.label.length * CHAR_W + PAD_X * 2);
+    for (const l of g.libs) l._w = nodeWidth(l.label, l.info, 90);
     const libW = Math.max(...g.libs.map(l => l._w));
-    const boxX = projRight + LIB_GAP;
+    const libX = layout.right + LIB_GAP + LIB_PAD;
     const ys = new Map(g.libs.map(l => [l.id, []]));
     for (const e of g.libEdges) {
       const a = byId.get(e.from);
       if (a && ys.has(e.to)) ys.get(e.to).push(a._y);
     }
     const meanY = id => { const a = ys.get(id); return a.length ? a.reduce((s, v) => s + v, 0) / a.length : Infinity; };
-    [...g.libs].sort((p, q) => meanY(p.id) - meanY(q.id) || p.label.localeCompare(q.label)).forEach((l, i) => {
-      l._x = boxX + LIB_PAD;
+    let floor = MARGIN_TOP + LIB_HEAD;
+    for (const l of [...g.libs].sort((p, q) => meanY(p.id) - meanY(q.id) || p.label.localeCompare(q.label))) {
+      const want = meanY(l.id);
+      l._x = libX;
       l._w = libW;
-      l._y = MARGIN_TOP + LIB_HEAD + i * (NODE_H + LIB_VGAP);
-      l._cx = l._x + libW / 2;
-    });
-    const boxH = LIB_HEAD + g.libs.length * (NODE_H + LIB_VGAP) - LIB_VGAP + LIB_PAD;
-    libBox = { x: boxX, y: MARGIN_TOP, w: LIB_PAD * 2 + libW, h: boxH };
+      l._y = Math.max(floor, isFinite(want) ? want : floor);
+      floor = l._y + NODE_H + LIB_VGAP;
+    }
+    libBox = {
+      label: "libraries", color: LIB_COLOR, labelX: 14, labelY: 23,
+      fillOpacity: 0.05, strokeOpacity: 0.35,
+      pad: LIB_PAD, head: LIB_HEAD, minW: 0,
+      nodes: g.libs, kids: [], members: g.libs,
+    };
+    boxes.push(libBox);
   }
 
-  const canvasW = (libBox ? libBox.x + libBox.w : projRight) + MARGIN;
-  const canvasH = Math.max(projBottom, libBox ? libBox.y + libBox.h : 0) + MARGIN;
+  // Everything above computes each node's home spot, so re-renders stay stable;
+  // the user's drags are applied on top of it. The libs were ordered by the home
+  // spots too, so moving a package never reshuffles them.
+  const shownNodes = libBox ? [...g.nodes, ...g.libs] : g.nodes;
+  for (const nd of shownNodes) {
+    const o = moved.get(nd.id);
+    if (o) { nd._x += o.dx; nd._y += o.dy; }
+  }
+
+  // A box's extent is always derived from its contents, so dragging a member
+  // re-wraps every box around it. Children come after parents in `boxes`, so
+  // walking backwards fits inner boxes first.
+  function fitBoxes() {
+    for (let i = boxes.length - 1; i >= 0; i--) {
+      const b = boxes[i];
+      const parts = [...b.nodes.map(nodeRect), ...b.kids];
+      const left = Math.min(...parts.map(p => p.x)) - b.pad;
+      const right = Math.max(...parts.map(p => p.x + p.w)) + b.pad;
+      const grow = Math.max(0, b.minW - (right - left)) / 2; // room for a long label
+      b.x = left - grow;
+      b.w = right - left + grow * 2;
+      b.y = Math.min(...parts.map(p => p.y)) - b.head;
+      b.h = Math.max(...parts.map(p => p.y + p.h)) + b.pad - b.y;
+    }
+  }
+  fitBoxes();
+
+  const allRects = () => [...shownNodes.map(nodeRect), ...boxes];
+  const layerText = layer => [layer?.name, layer?.description].filter(Boolean);
+  const layerLabelX = GAP_ROOT + LAYER_BTN_W + LAYER_BTN_GAP;
+  const layerLabelRects = layout.dividers.map(d => ({
+    x: layerLabelX, y: d.labelY,
+    w: layerText(d.layer).join(" — ").length * CHAR_W, h: 0,
+  }));
 
   document.getElementById("stats").textContent =
     `${g.nodes.length} packages · ${topBoxes.length} groups · ${g.libs.length} libraries`;
 
   const svg = document.getElementById("svg");
-  svg.setAttribute("width", canvasW);
-  svg.setAttribute("height", canvasH);
-  svg.setAttribute("viewBox", `0 0 ${canvasW} ${canvasH}`);
+  // While dragging the canvas only grows: shrinking it could clamp the scroll
+  // position and slide the content out from under the pointer.
+  function fitCanvas(growOnly) {
+    const rects = [...allRects(), ...layerLabelRects];
+    let w = Math.max(0, ...rects.map(r => r.x + r.w)) + MARGIN;
+    let h = Math.max(0, ...rects.map(r => r.y + r.h)) + MARGIN;
+    if (growOnly) {
+      w = Math.max(w, Number(svg.getAttribute("width")));
+      h = Math.max(h, Number(svg.getAttribute("height")));
+    }
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+  }
+  fitCanvas(false);
   svg.innerHTML = "";
 
   const defs = el("defs");
@@ -335,95 +809,362 @@ function render(g) {
     `<marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
        <path d="M0,0 L7,3 L0,6 Z" fill="#5b6b82"/></marker>
      <marker id="arrow-hi" markerWidth="10" markerHeight="10" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
-       <path d="M0,0 L7.5,3.2 L0,6.4 Z" fill="#6ea8fe"/></marker>`;
+       <path d="M0,0 L7.5,3.2 L0,6.4 Z" style="fill: var(--line-hi)"/></marker>
+     <marker id="arrow-in" markerWidth="10" markerHeight="10" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+       <path d="M0,0 L7.5,3.2 L0,6.4 Z" style="fill: var(--line-in)"/></marker>`;
   svg.appendChild(defs);
 
-  // Folder boxes (outer first so nested boxes sit on top). Deeper boxes are
+  // Bands and lines stay at the layer's home spot: they mark the configured layout,
+  // so dragging packages away doesn't move them. Every other band is tinted. The last
+  // one runs off the canvas, so it still reaches the bottom when a drag grows it.
+  layout.dividers.forEach((d, k) => {
+    const next = layout.dividers[k + 1];
+    if (k % 2) svg.appendChild(el("rect", { class: "layer-band", x: 0, y: d.topY, width: "100%", height: next ? next.topY - d.topY : "100%" }));
+    if (k) svg.appendChild(el("line", { class: "layer-line", x1: 0, x2: "100%", y1: d.topY, y2: d.topY }));
+  });
+
+  // Boxes (outer first so nested boxes sit on top). Deeper folder boxes are
   // slightly more opaque so the nesting reads.
-  for (const b of boxDraws) {
-    const fo = Math.min(0.05 + 0.045 * (b.depth - 1), 0.22);
-    const so = Math.min(0.3 + 0.12 * (b.depth - 1), 0.7);
-    svg.appendChild(el("rect", {
-      class: "box-bg", x: b.x, y: b.y, width: b.w, height: b.h, rx: 10,
-      fill: b.color, "fill-opacity": fo, stroke: b.color, "stroke-opacity": so,
-    }));
-    const lbl = el("text", { class: "box-label", x: b.x + 12, y: b.y + 19, fill: b.color });
-    lbl.textContent = b.label;
-    svg.appendChild(lbl);
+  function syncBox(b) {
+    b.rectEl.setAttribute("x", b.x);
+    b.rectEl.setAttribute("y", b.y);
+    b.rectEl.setAttribute("width", b.w);
+    b.rectEl.setAttribute("height", b.h);
+    b.labelEl.setAttribute("x", b.x + b.labelX);
+    b.labelEl.setAttribute("y", b.y + b.labelY);
   }
-
-  // Libraries box.
-  if (libBox) {
-    svg.appendChild(el("rect", {
-      class: "box-bg", x: libBox.x, y: libBox.y, width: libBox.w, height: libBox.h, rx: 10,
-      fill: LIB_COLOR, "fill-opacity": 0.05, stroke: LIB_COLOR, "stroke-opacity": 0.35,
-    }));
-    const lbl = el("text", { class: "box-label", x: libBox.x + 14, y: libBox.y + 24, fill: LIB_COLOR });
-    lbl.textContent = "libraries";
-    svg.appendChild(lbl);
-  }
-
-  // Give each target a distinct landing point per incoming edge: 1 lands
-  // dead-centre on the top edge, N spread evenly across it. Incoming edges are
-  // ordered by their source's x so left sources take the left slots.
-  const drawn = g.edges.map(e => ({ e, a: byId.get(e.from), b: byId.get(e.to) })).filter(x => x.a && x.b);
-  drawn.forEach(x => (x.cross = topFolder(x.a.id) !== topFolder(x.b.id)));
-  const incoming = new Map();
-  for (const x of drawn) (incoming.get(x.b.id) || incoming.set(x.b.id, []).get(x.b.id)).push(x);
-  for (const [, list] of incoming) {
-    list.sort((p, q) => p.a._cx - q.a._cx || p.a.id.localeCompare(q.a.id));
-    const n = list.length;
-    list.forEach((x, i) => { x.landX = x.b._x + x.b._w * (0.5 + PORT_INSET * ((i + 1) / (n + 1) - 0.5)); });
-  }
-
-  // Project edges: source bottom centre -> target's landing point on its top.
-  const edgeEls = [];
-  for (const x of drawn) {
-    const x1 = x.a._cx, y1 = x.a._y + NODE_H, x2 = x.landX, y2 = x.b._y, my = (y1 + y2) / 2;
-    const path = el("path", {
-      class: "edge" + (x.cross ? " cross" : ""),
-      d: `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`,
-      "marker-end": "url(#arrow)",
+  for (const b of boxes) {
+    b.rectEl = el("rect", {
+      class: "box-bg", rx: 10,
+      fill: b.color, "fill-opacity": b.fillOpacity, stroke: b.color, "stroke-opacity": b.strokeOpacity,
     });
-    path._from = x.e.from; path._to = x.e.to;
-    edgeEls.push(path); svg.appendChild(path);
+    b.labelEl = el("text", { class: "box-label", fill: b.color });
+    b.labelEl.textContent = b.label;
+    svg.appendChild(b.rectEl);
+    svg.appendChild(b.labelEl);
+    syncBox(b);
+    makeDraggable(b.rectEl, b.members);
   }
+
+  const edgeEls = [];
+  const addEdgePath = (e, cls) => {
+    const path = el("path", { class: "edge " + cls, "marker-end": "url(#arrow)" });
+    path._from = e.from; path._to = e.to;
+    edgeEls.push(path);
+    svg.appendChild(path);
+    return path;
+  };
 
   // Library edges: package right side -> lib left side.
+  const libDrawn = [];
   if (libBox) {
     for (const e of g.libEdges) {
       const a = byId.get(e.from), l = libById.get(e.to);
-      if (!a || !l) continue;
-      const x1 = a._x + a._w, y1 = a._y + NODE_H / 2, x2 = l._x, y2 = l._y + NODE_H / 2, mx = (x1 + x2) / 2;
-      const path = el("path", {
-        class: "edge lib",
-        d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`,
-        "marker-end": "url(#arrow)",
-      });
-      path._from = e.from; path._to = e.to;
-      edgeEls.push(path); svg.appendChild(path);
+      if (a && l) libDrawn.push({ a, l, path: addEdgePath(e, "lib") });
     }
   }
 
+  // Project edges, with the ones that carry structure drawn last, on top.
+  const drawn = g.edges
+    .map(e => ({ e, a: byId.get(e.from), b: byId.get(e.to) }))
+    .filter(x => x.a && x.b)
+    .sort((p, q) => Number(q.e.implied) - Number(p.e.implied));
+  for (const x of drawn) {
+    const cross = topFolder(x.a.id) !== topFolder(x.b.id) ? "cross" : "";
+    x.path = addEdgePath(x.e, `${cross} ${x.e.implied ? "implied" : ""}`);
+  }
+
+  // Routing works from wherever the nodes are now, so it holds up under dragging.
+  // A band is a run of nodes overlapping vertically (a row, unless something was
+  // dragged out of line); its gaps are where an arrow can pass through it.
+  function rowBands() {
+    const bands = [];
+    for (const n of [...g.nodes].sort((p, q) => p._y - q._y)) {
+      const last = bands[bands.length - 1];
+      if (last && n._y < last.bottom) {
+        last.nodes.push(n);
+        last.bottom = Math.max(last.bottom, n._y + NODE_H);
+      } else {
+        bands.push({ top: n._y, bottom: n._y + NODE_H, nodes: [n] });
+      }
+    }
+    for (const band of bands) {
+      band.nodes.sort((p, q) => p._x - q._x);
+      band.gaps = [];
+      let left = -Infinity;
+      for (const n of band.nodes) {
+        if (n._x - GAP_MARGIN >= left) band.gaps.push([left, n._x - GAP_MARGIN]);
+        left = Math.max(left, n._x + n._w + GAP_MARGIN);
+      }
+      band.gaps.push([left, Infinity]);
+    }
+    return bands;
+  }
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const inBox = (x, y, b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h;
+  const unrelated = (b, e) => !b.memberIds.has(e.from) && !b.memberIds.has(e.to);
+
+  // Picks a gap in every band an arrow must cross: a small shortest-path search
+  // that prefers staying straight and staying out of folders it has no part in.
+  function chooseWay(x, bands) {
+    const { upper, lower, e } = x;
+    const x1 = centerX(upper), y1 = upper._y + NODE_H, x2 = centerX(lower), y2 = lower._y;
+    let layer = [{ x: x1, cost: 0, prev: null }];
+    for (const band of bands) {
+      if (band.top < y1 || band.bottom > y2) continue;
+      const midY = (band.top + band.bottom) / 2;
+      const line = x1 + (x2 - x1) * (midY - y1) / (y2 - y1);
+      const next = [];
+      band.gaps.forEach(([lo, hi], gap) => {
+        const mid = isFinite(lo) && isFinite(hi) ? (lo + hi) / 2 : clamp(line, lo, hi);
+        for (const cx of new Set([clamp(line, lo, hi), mid, clamp(x1, lo, hi), clamp(x2, lo, hi)])) {
+          let penalty = 0;
+          for (const fb of folderBoxes) if (unrelated(fb, e) && inBox(cx, midY, fb)) penalty += BOX_PENALTY;
+          let prev = layer[0];
+          for (const p of layer) if (p.cost + Math.abs(cx - p.x) < prev.cost + Math.abs(cx - prev.x)) prev = p;
+          next.push({ x: cx, cost: prev.cost + Math.abs(cx - prev.x) + penalty, prev, band, gap });
+        }
+      });
+      layer = next;
+    }
+    let tail = layer[0];
+    for (const p of layer) if (p.cost + Math.abs(x2 - p.x) < tail.cost + Math.abs(x2 - tail.x)) tail = p;
+    const way = [];
+    for (let p = tail; p.prev; p = p.prev) way.unshift({ x: p.x, band: p.band, gap: p.gap, order: (x1 + x2) / 2 });
+    return way;
+  }
+
+  // True when the S-curve between two points touches no other package and enters
+  // no unrelated folder, so any waypoints between them can be dropped.
+  function curveIsClear(p, q, x, bands) {
+    const my = (p.y + q.y) / 2;
+    const steps = Math.ceil((Math.abs(q.x - p.x) + q.y - p.y) / CURVE_STEP); // fine enough to never skip a node
+    for (let k = 1; k < steps; k++) {
+      const t = k / steps, s = 1 - t;
+      const cx = s * s * s * p.x + 3 * s * s * t * p.x + 3 * s * t * t * q.x + t * t * t * q.x;
+      const cy = s * s * s * p.y + 3 * s * s * t * my + 3 * s * t * t * my + t * t * t * q.y;
+      for (const band of bands) {
+        if (cy < band.top - GAP_MARGIN || cy > band.bottom + GAP_MARGIN) continue;
+        for (const n of band.nodes) {
+          if (n === x.a || n === x.b) continue;
+          if (cx > n._x - GAP_MARGIN && cx < n._x + n._w + GAP_MARGIN) return false;
+        }
+      }
+      for (const fb of folderBoxes) if (unrelated(fb, x.e) && inBox(cx, cy, fb)) return false;
+    }
+    return true;
+  }
+
+  const sCurve = (px, py, qx, qy) => {
+    const my = (py + qy) / 2;
+    return `C${px},${my} ${qx},${my} ${qx},${qy}`;
+  };
+
+  // Arrows share gaps without overlapping, leave and land at distinct ports ordered
+  // by direction, and keep only the waypoints they need. Hidden arrows are routed
+  // too, so turning them on or hovering them moves nothing else. An import can point
+  // up, through a configured layer or a drag, so routes run from the upper package
+  // to the lower one and the path is reversed for those.
+  function routeProjectEdges(bands) {
+    const channels = new Map();
+    for (const x of drawn) {
+      x.up = x.a._y > x.b._y + NODE_H;
+      [x.upper, x.lower] = x.up ? [x.b, x.a] : [x.a, x.b];
+      x.way = x.lower._y > x.upper._y + NODE_H ? chooseWay(x, bands) : [];
+      for (const w of x.way) {
+        const k = bands.indexOf(w.band) + ":" + w.gap;
+        (channels.get(k) || channels.set(k, []).get(k)).push(w);
+      }
+    }
+    for (const group of channels.values()) {
+      const [lo, hi] = group[0].band.gaps[group[0].gap];
+      group.sort((p, q) => p.x - q.x || p.order - q.order);
+      const room = isFinite(lo) && isFinite(hi) ? hi - lo : Infinity;
+      const step = group.length > 1 ? Math.min(CHANNEL, room / group.length) : CHANNEL;
+      const span = step * (group.length - 1);
+      const mean = group.reduce((s, w) => s + w.x, 0) / group.length;
+      const start = clamp(mean - span / 2, lo, hi - span);
+      group.forEach((w, i) => { w.x = start + i * step; });
+    }
+    const port = (nd, i, n) => nd._x + nd._w * (0.5 + PORT_INSET * ((i + 1) / (n + 1) - 0.5));
+    const outgoing = new Map(), incoming = new Map();
+    for (const x of drawn) {
+      (outgoing.get(x.upper) || outgoing.set(x.upper, []).get(x.upper)).push(x);
+      (incoming.get(x.lower) || incoming.set(x.lower, []).get(x.lower)).push(x);
+    }
+    for (const [nd, group] of outgoing) {
+      const aim = x => x.way.length ? x.way[0].x : centerX(x.lower);
+      group.sort((p, q) => aim(p) - aim(q) || p.lower.id.localeCompare(q.lower.id));
+      group.forEach((x, i) => { x.x1 = port(nd, i, group.length); });
+    }
+    for (const [nd, group] of incoming) {
+      const from = x => x.way.length ? x.way[x.way.length - 1].x : centerX(x.upper);
+      group.sort((p, q) => from(p) - from(q) || p.upper.id.localeCompare(q.upper.id));
+      group.forEach((x, i) => { x.x2 = port(nd, i, group.length); });
+    }
+    for (const x of drawn) {
+      const start = { x: x.x1, y: x.upper._y + NODE_H }, end = { x: x.x2, y: x.lower._y };
+      const entry = w => ({ x: w.x, y: w.band.top - 2 });
+      const exit = w => ({ x: w.x, y: w.band.bottom + 2 });
+      const pieces = [];
+      let from = start, i = 0;
+      while (i <= x.way.length) {
+        // Jump to the furthest later point reachable by one clear curve.
+        let j = x.way.length;
+        while (j > i && !curveIsClear(from, j === x.way.length ? end : entry(x.way[j]), x, bands)) j--;
+        const to = j === x.way.length ? end : entry(x.way[j]);
+        pieces.push({ from, to, curve: true });
+        if (j === x.way.length) break;
+        const out = exit(x.way[j]);
+        pieces.push({ from: to, to: out, curve: false });
+        from = out;
+        i = j + 1;
+      }
+      const ordered = x.up ? pieces.reverse().map(p => ({ ...p, from: p.to, to: p.from })) : pieces;
+      let d = `M${ordered[0].from.x},${ordered[0].from.y}`;
+      for (const p of ordered) {
+        d += p.curve ? " " + sCurve(p.from.x, p.from.y, p.to.x, p.to.y) : ` L${p.to.x},${p.to.y}`;
+      }
+      x.path.setAttribute("d", d);
+    }
+  }
+
+  function routeEdges() {
+    routeProjectEdges(rowBands());
+    for (const { a, l, path } of libDrawn) {
+      const x1 = a._x + a._w, y1 = a._y + NODE_H / 2, x2 = l._x, y2 = l._y + NODE_H / 2, mx = (x1 + x2) / 2;
+      path.setAttribute("d", `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+    }
+  }
+  routeEdges();
+
+  // A band can hold no package of its own layer: its folder's packages may all be
+  // listed under other layers. Then there is nothing for a button to toggle.
+  const layerToggles = [];
+  function addLayerToggle(d) {
+    const btn = el("g", { class: "layer-toggle", role: "button", tabindex: 0 });
+    btn.appendChild(el("rect", { x: GAP_ROOT, y: d.labelY - 4 - LAYER_BTN_H / 2, width: LAYER_BTN_W, height: LAYER_BTN_H, rx: 5 }));
+    const text = el("text", { x: GAP_ROOT + LAYER_BTN_W / 2, y: d.labelY - 4 });
+    btn.appendChild(text);
+    const title = el("title");
+    btn.appendChild(title);
+    btn.addEventListener("click", () => toggleLayer(d.ids));
+    btn.addEventListener("keydown", ev => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleLayer(d.ids); }
+    });
+    svg.appendChild(btn);
+    layerToggles.push({ btn, text, title, ids: d.ids, name: d.layer?.name || "this layer" });
+  }
+
+  // Layer labels go over the arrows so they stay readable, but under the packages.
+  layout.dividers.forEach((d, k) => {
+    if (d.ids.length) addLayerToggle(d);
+    const [name, description] = [d.layer?.name, d.layer?.description];
+    if (!name && !description) return;
+    const label = el("text", { class: "layer-label" + (k % 2 ? " alt" : ""), x: layerLabelX, y: d.labelY });
+    if (name) {
+      const nameEl = el("tspan", { class: "layer-name" });
+      nameEl.textContent = name;
+      label.appendChild(nameEl);
+    }
+    if (description) label.appendChild(document.createTextNode((name ? " — " : "") + description));
+    svg.appendChild(label);
+  });
+
   const nodeEls = new Map();
+  const syncNode = nd => nodeEls.get(nd.id).setAttribute("transform", `translate(${nd._x},${nd._y})`);
   const addNode = (id, label, cls, titleText) => {
     const nd = byId.get(id) || libById.get(id);
     const gEl = el("g", { class: cls });
-    gEl.appendChild(el("rect", { x: nd._x, y: nd._y, width: nd._w, height: NODE_H, rx: 7 }));
-    const t = el("text", { x: nd._cx, y: nd._y + NODE_H / 2 });
+    gEl.appendChild(el("rect", { width: nd._w, height: NODE_H, rx: 7 }));
+    const t = el("text", { x: (nd._w - (nd.info ? INFO_W : 0)) / 2, y: NODE_H / 2 });
     t.textContent = label;
     gEl.appendChild(t);
     const title = el("title"); title.textContent = titleText; gEl.appendChild(title);
+    if (nd.info) gEl.appendChild(infoButton(nd, titleText));
     gEl.addEventListener("mouseenter", () => highlight(id));
     gEl.addEventListener("mouseleave", clear);
+    gEl.addEventListener("click", () => { if (!justDragged) cycleNode(id); });
     svg.appendChild(gEl);
     nodeEls.set(id, gEl);
+    syncNode(nd);
+    makeDraggable(gEl, [nd]);
   };
   for (const n of g.nodes) {
-    addNode(n.id, pkgLabel(n.id), "node" + (hasIn.has(n.id) ? "" : " root"), n.pkg);
-    nodeEls.get(n.id).addEventListener("click", () => toggleHidden(n.id));
+    const entry = n.name === "main" || g.layers[layout.layerOf(n.id)]?.entrypoint;
+    addNode(n.id, n._label, "node" + (entry ? " entry" : ""), n.pkg);
   }
   if (libBox) for (const l of g.libs) addNode(l.id, l.label, "node lib", l.id);
+
+  // Shift nodes by the given amount, recording it so it survives re-renders.
+  function shiftNodes(nodes, dx, dy) {
+    for (const nd of nodes) {
+      nd._x += dx; nd._y += dy;
+      const o = moved.get(nd.id) || { dx: 0, dy: 0 };
+      o.dx += dx; o.dy += dy;
+      moved.set(nd.id, o);
+    }
+    fitBoxes();
+  }
+
+  // Move nodes, stopping short of the top/left edge (the canvas only extends
+  // right and down). Returns how far they actually went.
+  function moveNodes(nodes, dx, dy) {
+    shiftNodes(nodes, dx, dy);
+    const rects = allRects();
+    const backX = Math.max(0, EDGE_MIN - Math.min(...rects.map(r => r.x)));
+    const backY = Math.max(0, EDGE_MIN - Math.min(...rects.map(r => r.y)));
+    if (backX || backY) shiftNodes(nodes, backX, backY);
+    return [dx + backX, dy + backY];
+  }
+
+  // Dragging `target` moves all of `nodes` by the same amount: one node for a
+  // node, every descendant for a box. Boxes have no position of their own, so
+  // nested boxes follow by being re-fitted. The pointer is captured, so hover
+  // highlighting on other nodes stays quiet until the drop.
+  function makeDraggable(target, nodes) {
+    target.addEventListener("pointerdown", down => {
+      if (down.button !== 0) return;
+      justDragged = false;
+      target.setPointerCapture(down.pointerId);
+      const wrap = document.getElementById("wrap");
+      const canvasPos = ev => [ev.clientX + wrap.scrollLeft, ev.clientY + wrap.scrollTop];
+      const [startX, startY] = canvasPos(down);
+      let doneX = 0, doneY = 0;
+      const onMove = ev => {
+        const [x, y] = canvasPos(ev);
+        const wantX = x - startX, wantY = y - startY;
+        if (!justDragged) {
+          if (Math.hypot(wantX, wantY) < DRAG_MIN) return;
+          justDragged = true;
+          document.body.classList.add("dragging");
+          // Raise what's moving so it can't end up buried under another node.
+          // Only once it's a real drag: re-inserting an element on press would
+          // lose its click. It also releases the capture, so take that again.
+          // Walking the DOM keeps the stacking order within a dragged group.
+          const raising = new Set(nodes.map(nd => nodeEls.get(nd.id)));
+          for (const child of [...svg.children]) if (raising.has(child)) svg.appendChild(child);
+          target.setPointerCapture(ev.pointerId);
+        }
+        const [wentX, wentY] = moveNodes(nodes, wantX - doneX, wantY - doneY);
+        doneX += wentX; doneY += wentY;
+        nodes.forEach(syncNode);
+        boxes.forEach(syncBox);
+        routeEdges();
+        fitCanvas(true);
+      };
+      const onEnd = () => {
+        target.removeEventListener("pointermove", onMove);
+        target.removeEventListener("pointerup", onEnd);
+        target.removeEventListener("pointercancel", onEnd);
+        document.body.classList.remove("dragging");
+        if (justDragged) fitCanvas(false);
+      };
+      target.addEventListener("pointermove", onMove);
+      target.addEventListener("pointerup", onEnd);
+      target.addEventListener("pointercancel", onEnd);
+    });
+  }
 
   // Adjacency for hover highlighting.
   const neighbors = new Map();
@@ -431,65 +1172,94 @@ function render(g) {
   for (const e of g.edges) { add(e.from, e.to); add(e.to, e.from); }
   if (libBox) for (const e of g.libEdges) { add(e.from, e.to); add(e.to, e.from); }
 
-  // A toggled-off package is greyed in place and every edge touching it is hidden.
+  // A toggled-off node is greyed in place and every edge touching it is hidden.
   const edgeOff = p => hidden.has(p._from) || hidden.has(p._to);
   function applyVisibility() {
-    nodeEls.forEach((el, nid) => el.classList.toggle("off", hidden.has(nid)));
+    nodeEls.forEach((el, nid) => {
+      el.classList.toggle("off", hidden.has(nid));
+      el.classList.toggle("pinned", highlighted.has(nid));
+    });
     for (const p of edgeEls) p.classList.toggle("off", edgeOff(p));
+    for (const { btn, text, title, ids, name } of layerToggles) {
+      const off = ids.every(id => hidden.has(id));
+      btn.classList.toggle("off", off);
+      text.textContent = off ? "show" : "hide";
+      title.textContent = `${off ? "Show" : "Hide"} every package in ${name}`;
+    }
+    highlight();
     updateHiddenControl();
   }
-  function toggleHidden(id) {
-    if (hidden.has(id)) hidden.delete(id);
-    else hidden.add(id);
-    clear();
+  // Hides the whole layer, unless it's all hidden already. A partly hidden layer
+  // still offers "hide", the same way "hide all" finishes the job.
+  function toggleLayer(ids) {
+    if (ids.every(id => hidden.has(id))) ids.forEach(id => hidden.delete(id));
+    else for (const id of ids) { hidden.add(id); highlighted.delete(id); }
     applyVisibility();
   }
+  // A node's clicks rotate through normal, highlighted, and hidden.
+  function cycleNode(id) {
+    if (hidden.has(id)) hidden.delete(id);
+    else if (highlighted.has(id)) { highlighted.delete(id); hidden.add(id); }
+    else highlighted.add(id);
+    applyVisibility();
+    highlight(id); // the pointer is still on it
+  }
 
-  // Hover highlighting skips off packages and their edges so they stay muted.
-  function highlight(id) {
-    if (hidden.has(id)) return;
-    const keep = new Set(neighbors.get(id) || []);
-    keep.add(id);
+  // A highlighted node looks like a hovered one that stays that way: its arrows are
+  // lit, its neighbours stay readable, and everything else dims. Hidden nodes and
+  // their edges stay muted. Arrows leaving a lit node and arrows reaching one get
+  // different colours; one running between two lit nodes counts as leaving.
+  function highlight(hoverId) {
+    const lit = new Set([...highlighted].filter(id => nodeEls.has(id)));
+    if (hoverId !== undefined && !hidden.has(hoverId)) lit.add(hoverId);
+    const keep = new Set(lit);
+    for (const id of lit) for (const n of neighbors.get(id) || []) keep.add(n);
     nodeEls.forEach((el, nid) => {
-      if (hidden.has(nid)) return;
-      el.classList.toggle("dim", !keep.has(nid));
-      el.classList.toggle("hi", nid === id);
+      const off = hidden.has(nid);
+      el.classList.toggle("dim", !off && lit.size > 0 && !keep.has(nid));
+      el.classList.toggle("hi", !off && lit.has(nid));
     });
     for (const p of edgeEls) {
-      if (edgeOff(p)) continue;
-      const touches = p._from === id || p._to === id;
-      p.classList.toggle("hi", touches);
-      p.classList.toggle("dim", !touches);
-      p.setAttribute("marker-end", touches ? "url(#arrow-hi)" : "url(#arrow)");
+      const leaving = lit.has(p._from);
+      const touches = leaving || lit.has(p._to);
+      const on = !edgeOff(p) && touches;
+      p.classList.toggle("hi", on);
+      p.classList.toggle("in", on && !leaving);
+      p.classList.toggle("dim", !edgeOff(p) && lit.size > 0 && !touches);
+      p.setAttribute("marker-end", !on ? "url(#arrow)" : leaving ? "url(#arrow-hi)" : "url(#arrow-in)");
     }
   }
   function clear() {
-    nodeEls.forEach((el, nid) => { if (!hidden.has(nid)) el.classList.remove("dim", "hi"); });
-    for (const p of edgeEls) {
-      if (edgeOff(p)) continue;
-      p.classList.remove("hi", "dim");
-      p.setAttribute("marker-end", "url(#arrow)");
-    }
+    highlight();
   }
 
   document.getElementById("hideAll").onclick = () => {
-    for (const n of g.nodes) hidden.add(n.id);
-    clear();
+    for (const n of g.nodes) { hidden.add(n.id); highlighted.delete(n.id); }
     applyVisibility();
   };
   document.getElementById("showAll").onclick = () => {
     if (!hidden.size) return;
     hidden.clear();
-    clear();
     applyVisibility();
   };
   applyVisibility();
 }
 
+// The dialog's only child fills it, so a click landing on the dialog itself is on
+// the backdrop.
+document.getElementById("info").addEventListener("click", ev => {
+  if (ev.target === ev.currentTarget) ev.currentTarget.close();
+});
 document.getElementById("showLibs").addEventListener("change", () => { if (currentGraph) render(currentGraph); });
+document.getElementById("showImplied").addEventListener("change", ev => {
+  document.body.classList.toggle("show-implied", ev.target.checked);
+});
 
 fetch("graph.json")
-  .then(r => { if (!r.ok) throw new Error("graph.json: " + r.status); return r.json(); })
+  .then(async r => {
+    if (!r.ok) throw new Error((await r.text()).trim() || "graph.json: " + r.status);
+    return r.json();
+  })
   .then(g => { currentGraph = g; render(g); })
   .catch(err => { document.getElementById("err").textContent = String(err); });
 </script>

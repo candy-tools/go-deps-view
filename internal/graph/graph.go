@@ -14,11 +14,13 @@ import (
 	"strings"
 )
 
-// Node is one in-module Go package. The viewer derives its folder-box nesting,
-// label, and layer from the ID, so nothing else is needed here.
+// Node is one in-module Go package. The viewer derives its folder-box nesting and
+// layer from the ID and the edges; Name tells it which packages are programs.
 type Node struct {
-	ID  string `json:"id"`  // module-relative path, e.g. "./app/router" ("." is main)
-	Pkg string `json:"pkg"` // full import path
+	ID   string `json:"id"`   // module-relative path, e.g. "./app/router" ("." is the module root)
+	Pkg  string `json:"pkg"`  // full import path
+	Name string `json:"name"` // package clause name, "main" for a program
+	Info string `json:"info"` // configured info text, empty when there is none
 }
 
 // Edge is a "From imports To" relationship between two in-module packages.
@@ -32,16 +34,18 @@ type Edge struct {
 type Lib struct {
 	ID    string `json:"id"`    // module path, e.g. "github.com/gorilla/mux"
 	Label string `json:"label"` // short display name
+	Info  string `json:"info"`  // configured info text, empty when there is none
 }
 
 // Graph is the whole dependency graph: in-module packages and their import
 // edges, plus the external libraries the project imports directly.
 type Graph struct {
-	Module   string `json:"module"`
-	Nodes    []Node `json:"nodes"`
-	Edges    []Edge `json:"edges"`
-	Libs     []Lib  `json:"libs"`     // external dependency modules
-	LibEdges []Edge `json:"libEdges"` // project package -> lib module
+	Module   string  `json:"module"`
+	Nodes    []Node  `json:"nodes"`
+	Edges    []Edge  `json:"edges"`
+	Libs     []Lib   `json:"libs"`     // external dependency modules
+	LibEdges []Edge  `json:"libEdges"` // project package -> lib module
+	Layers   []Layer `json:"layers"`   // configured layers, top first; empty when not configured
 }
 
 // goListPkg is the subset of `go list -deps -json` output that we use.
@@ -57,7 +61,8 @@ type goListPkg struct {
 
 // Build runs `go list` in dir and assembles the dependency graph, including the
 // external libraries the project packages import directly. Packages whose import
-// path contains any of the exclude substrings are dropped.
+// path contains any of the exclude substrings are dropped. The layers and info
+// texts in dir's config file, if any, are passed along for the viewer.
 func Build(dir string, exclude []string) (*Graph, error) {
 	module, err := modulePath(dir)
 	if err != nil {
@@ -85,6 +90,7 @@ func Build(dir string, exclude []string) (*Graph, error) {
 	// (non-stdlib) imports are resolved to their library module and collapsed to
 	// one edge per (package, library).
 	imports := map[string][]string{}         // id -> local import ids
+	names := map[string]string{}             // id -> package clause name
 	libSet := map[string]bool{}              // library module paths
 	libEdges := map[string]map[string]bool{} // pkg id -> set of library ids
 	for _, p := range pkgs {
@@ -92,6 +98,7 @@ func Build(dir string, exclude []string) (*Graph, error) {
 			continue
 		}
 		id := relID(module, p.ImportPath)
+		names[id] = p.Name
 		if _, ok := imports[id]; !ok {
 			imports[id] = nil
 		}
@@ -116,8 +123,11 @@ func Build(dir string, exclude []string) (*Graph, error) {
 		}
 	}
 
-	g := assemble(module, imports)
+	g := assemble(module, imports, names)
 	addLibs(g, libSet, libEdges)
+	if err := applyConfig(g, dir); err != nil {
+		return nil, err
+	}
 	ensureNonNil(g)
 	return g, nil
 }
@@ -193,6 +203,9 @@ func ensureNonNil(g *Graph) {
 	if g.LibEdges == nil {
 		g.LibEdges = []Edge{}
 	}
+	if g.Layers == nil {
+		g.Layers = []Layer{}
+	}
 }
 
 // modulePath reads the module path from go.mod via `go list -m`.
@@ -209,7 +222,7 @@ func modulePath(dir string) (string, error) {
 // assemble turns the id->local-imports map into a flat graph of packages and
 // edges, sorted for stable output. All grouping and layering is done by the
 // viewer from the package paths.
-func assemble(module string, imports map[string][]string) *Graph {
+func assemble(module string, imports map[string][]string, names map[string]string) *Graph {
 	g := &Graph{Module: module}
 	ids := make([]string, 0, len(imports))
 	for id := range imports {
@@ -217,7 +230,7 @@ func assemble(module string, imports map[string][]string) *Graph {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		g.Nodes = append(g.Nodes, Node{ID: id, Pkg: fullPkg(module, id)})
+		g.Nodes = append(g.Nodes, Node{ID: id, Pkg: fullPkg(module, id), Name: names[id]})
 		deps := append([]string(nil), imports[id]...)
 		sort.Strings(deps)
 		for _, dep := range deps {
@@ -227,7 +240,7 @@ func assemble(module string, imports map[string][]string) *Graph {
 	return g
 }
 
-// relID converts a full import path to a module-relative id ("." for main).
+// relID converts a full import path to a module-relative id ("." for the root).
 func relID(module, importPath string) string {
 	if importPath == module {
 		return "."
