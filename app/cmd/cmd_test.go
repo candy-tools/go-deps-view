@@ -69,6 +69,41 @@ func TestRunJSONError(t *testing.T) {
 	}
 }
 
+func TestRunInitWritesConfigAndDoesNotServe(t *testing.T) {
+	restore := stubServe(func(string, string, []string) error {
+		t.Error("-init must not start the server")
+		return nil
+	})
+	defer restore()
+	dir := t.TempDir()
+
+	var out bytes.Buffer
+	if code := Run([]string{"-init", "-dir", dir}, &out, io.Discard); code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+
+	path := filepath.Join(dir, ".go-deps-view.config")
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("config not written: %v", err)
+	}
+	if !strings.Contains(out.String(), path) {
+		t.Errorf("stdout = %q, want it to name %s", out.String(), path)
+	}
+}
+
+func TestRunInitFailsOnExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ".go-deps-view.config"), "layers: []\n")
+
+	var errBuf bytes.Buffer
+	if code := Run([]string{"-init", "-dir", dir}, io.Discard, &errBuf); code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(errBuf.String(), ".go-deps-view.config") {
+		t.Errorf("stderr = %q, want it to name the file", errBuf.String())
+	}
+}
+
 func TestRunServeDispatch(t *testing.T) {
 	var gotAddr, gotDir string
 	var gotExclude []string

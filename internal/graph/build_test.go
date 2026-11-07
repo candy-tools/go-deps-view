@@ -15,15 +15,17 @@ func TestAssemble(t *testing.T) {
 		"./z":       {"./app/cmd"},
 	}
 
-	g := assemble(mod, imports)
+	names := map[string]string{".": "mod", "./app/cmd": "cmd", "./z": "main"}
+
+	g := assemble(mod, imports, names)
 
 	if g.Module != mod {
 		t.Errorf("Module = %q, want %q", g.Module, mod)
 	}
 	wantNodes := []Node{
-		{ID: ".", Pkg: "example.com/mod"},
-		{ID: "./app/cmd", Pkg: "example.com/mod/app/cmd"},
-		{ID: "./z", Pkg: "example.com/mod/z"},
+		{ID: ".", Pkg: "example.com/mod", Name: "mod"},
+		{ID: "./app/cmd", Pkg: "example.com/mod/app/cmd", Name: "cmd"},
+		{ID: "./z", Pkg: "example.com/mod/z", Name: "main"},
 	}
 	if !reflect.DeepEqual(g.Nodes, wantNodes) {
 		t.Errorf("Nodes = %+v, want %+v", g.Nodes, wantNodes)
@@ -50,9 +52,9 @@ func TestBuild(t *testing.T) {
 	}
 	// "." (main) and "./mocks" and "./sub" are in-module; extlib and fmt are not.
 	wantNodes := []Node{
-		{ID: ".", Pkg: "example.com/fixture"},
-		{ID: "./mocks", Pkg: "example.com/fixture/mocks"},
-		{ID: "./sub", Pkg: "example.com/fixture/sub"},
+		{ID: ".", Pkg: "example.com/fixture", Name: "main"},
+		{ID: "./mocks", Pkg: "example.com/fixture/mocks", Name: "mocks"},
+		{ID: "./sub", Pkg: "example.com/fixture/sub", Name: "sub"},
 	}
 	if !reflect.DeepEqual(g.Nodes, wantNodes) {
 		t.Errorf("Nodes = %+v, want %+v", g.Nodes, wantNodes)

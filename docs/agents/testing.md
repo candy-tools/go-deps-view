@@ -6,10 +6,13 @@
   transforms, and `Build` runs against **fixture modules** written to a temp dir —
   including a second local module wired in through a filesystem `replace`, so the
   external-library resolution path is exercised without any network access.
-- `app/server` is tested through `httptest`: the page, the graph JSON, a 404, and the
-  build-error 500 path.
+- `BuildSymbols` runs against a fixture module too, declaring one symbol of each kind, so
+  its signatures and uses are compared in full. Modules with a type error and a missing
+  import check that the resolved part still comes back.
+- `app/server` is tested through `httptest`: the page, the graph and symbols JSON, a 404,
+  and their build-error 500 paths.
 - `app/cmd` tests `Run(args, stdout, stderr) int` end to end (version, JSON dump, JSON
-  error, bad flag) and the serve dispatch via the injectable `serveFn` seam, so no test
+  error, config template, bad flag) and the serve dispatch via the injectable `serveFn` seam, so no test
   binds a port.
 
 ## Make targets
