@@ -1,5 +1,6 @@
 // Package cmd is the go-deps-view command-line entrypoint: it parses flags and
-// either prints the graph JSON, prints version information, or serves the viewer.
+// either prints the graph JSON, prints version information, writes a config
+// template, or serves the viewer.
 package cmd
 
 import (
@@ -34,6 +35,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	exclude := fs.String("exclude", "", "comma-separated import-path substrings to drop (e.g. /testdata,/mocks)")
 	dump := fs.Bool("json", false, "print the graph JSON to stdout and exit (no server)")
 	version := fs.Bool("version", false, "print version information and exit")
+	initConfig := fs.Bool("init", false, "write a commented .go-deps-view.config template to -dir and exit")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -43,6 +45,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		// stdout is not actionable, so the write error is intentionally dropped.
 		_, _ = fmt.Fprintf(stdout, "Version:    %s\nBuild date: %s\nCommit sha: %s\n",
 			metainfo.Version, metainfo.BuildTime, metainfo.ShaVer)
+		return 0
+	}
+
+	if *initConfig {
+		path, err := graph.InitConfig(*dir)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "go-deps-view:", err)
+			return 1
+		}
+		_, _ = fmt.Fprintf(stdout, "Created %s. Its comments explain how to fill it in.\n", path)
 		return 0
 	}
 

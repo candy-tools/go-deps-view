@@ -57,6 +57,7 @@
     user-select: none;
   }
   .toggle + .toggle { margin-left: 0; }
+  .toggle[hidden] { display: none; }
   .toggle input { accent-color: var(--lib); }
   .btn {
     font: inherit;
@@ -74,7 +75,9 @@
   .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
   .legend i { width: 14px; height: 3px; border-radius: 2px; background: var(--line-hi); }
   .legend i.in { margin-left: 6px; background: var(--line-in); }
-  #wrap { width: 100%; height: calc(100vh - 49px); overflow: auto; }
+  /* The stable gutter keeps the libraries' column, sized from this width, from being
+     pushed off the edge by the scrollbar that appears once the graph is drawn. */
+  #wrap { width: 100%; height: calc(100vh - 49px); overflow: auto; scrollbar-gutter: stable; }
   /* At least the window's size, so layer bands reach its edges on a small graph. */
   svg { display: block; user-select: none; min-width: 100%; min-height: 100%; }
 
@@ -109,9 +112,9 @@
   /* Quiet by default: library arrows and imports already implied by a longer path
      only appear for the node being hovered or highlighted. */
   .edge.lib:not(.hi),
-  body:not(.show-implied) .edge.implied:not(.hi) { opacity: 0; }
+  body:not(.show-implied) .edge.implied:not(.hi):not(.symbol) { opacity: 0; }
 
-  .node rect {
+  .node > rect {
     fill: var(--node);
     stroke: var(--node-border);
     stroke-width: 1.5;
@@ -125,19 +128,19 @@
     text-anchor: middle;
     pointer-events: none;
   }
-  .node.entry rect { stroke: var(--accent); stroke-width: 2; }
-  .node.lib rect { stroke: var(--lib); }
-  .node:hover rect, .node.hi rect { fill: var(--node-hi); stroke: var(--line-hi); }
+  .node.entry > rect { stroke: var(--accent); stroke-width: 2; }
+  .node.lib > rect { stroke: var(--lib); }
+  .node:hover > rect, .node.hi > rect { fill: var(--node-hi); stroke: var(--line-hi); }
   /* Amber, not hover's blue: a clicked node sits under the pointer, so the two have
      to look different for the click to show. */
-  .node.pinned rect { fill: var(--pinned); stroke: var(--lib); stroke-width: 2.5; }
+  .node.pinned > rect { fill: var(--pinned); stroke: var(--lib); stroke-width: 2.5; }
   .node.dim { opacity: 0.2; }
 
   /* Toggled-off nodes: greyed in place, with every edge touching them hidden. */
   .node.off { opacity: 0.5; }
-  .node.off rect,
-  .node.off:hover rect,
-  .node.off.hi rect {
+  .node.off > rect,
+  .node.off:hover > rect,
+  .node.off.hi > rect {
     fill: var(--node-off);
     stroke: var(--node-off-border);
     stroke-width: 1.5;
@@ -145,23 +148,60 @@
   .node.off text { fill: var(--muted); }
   .edge.off { display: none; }
 
+  /* A node button's click area, wider than its strokes. */
+  .hit { fill: transparent; }
+
   /* The info button: a circle, so the node's rect styles don't reach it. */
   .info-btn { cursor: pointer; }
-  .info-btn circle { fill: transparent; stroke: var(--muted); transition: stroke .12s; } /* transparent, not none, so the middle takes clicks */
+  .info-btn circle { fill: transparent; stroke: var(--muted); transition: stroke .12s; }
   .info-btn text { fill: var(--muted); font-weight: 700; font-style: italic; }
   .info-btn:hover circle, .info-btn:focus-visible circle { fill: var(--accent); stroke: var(--accent); }
   .info-btn:hover text, .info-btn:focus-visible text { fill: var(--bg); }
   .info-btn:focus { outline: none; }
 
-  #info { width: min(520px, calc(100vw - 32px)); padding: 0; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-  #info::backdrop { background: rgb(0 0 0 / 0.5); }
-  #info .info-body { padding: 16px 18px; }
-  #info h2 { margin: 0 0 10px; font: 700 13px ui-monospace, monospace; overflow-wrap: anywhere; }
-  #info p { margin: 0 0 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  #info form { text-align: right; }
+  /* The loupe that expands a package into its exported symbols. */
+  .loupe { cursor: pointer; }
+  .loupe:focus { outline: none; }
+  .loupe circle, .loupe line { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; transition: stroke .12s; }
+  .loupe:hover circle, .loupe:hover line,
+  .loupe:focus-visible circle, .loupe:focus-visible line { stroke: var(--text); }
+  .loupe.on circle, .loupe.on line { stroke: var(--accent); stroke-width: 2; }
+  .loupe.loading { animation: loupe-wait 0.8s ease-in-out infinite alternate; cursor: progress; }
+  @keyframes loupe-wait { to { opacity: 0.25; } }
 
-  /* Layers: alternating bands behind the graph with a solid line between them,
-     labelled over the arrows. The label's halo matches the band it sits on. */
+  .sym-rule { stroke: var(--node-border); }
+  .node .sym-row text, .node .sym-empty { text-anchor: start; font-size: 11px; fill: var(--muted); }
+  .node .sym-empty { font-style: italic; pointer-events: none; }
+  .sym-row rect { fill: transparent; transition: fill .12s; }
+  .sym-row:hover rect, .sym-row.hi rect { fill: var(--node-border); }
+  .node .sym-row:hover text, .node .sym-row.hi text { fill: var(--text); }
+
+  /* The body scrolls, not the dialog: a click on the dialog itself closes it. */
+  #info { width: min(720px, calc(100vw - 32px)); max-height: none; overflow: hidden; padding: 0; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  #info::backdrop { background: rgb(0 0 0 / 0.5); }
+  #info .info-body { max-height: calc(100vh - 64px); overflow: auto; padding: 16px 18px 12px; }
+  #infoTitle { margin: 0 0 10px; font: 700 13px ui-monospace, monospace; overflow-wrap: anywhere; color: var(--muted); }
+  #info form { position: sticky; bottom: 0; text-align: right; padding-top: 10px; background: var(--panel); }
+
+  /* The README, rendered from markdown by the server. */
+  .md { font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+  .md > :first-child { margin-top: 0; }
+  .md h1, .md h2, .md h3, .md h4 { margin: 1.2em 0 0.5em; line-height: 1.3; color: var(--text); font-family: inherit; }
+  .md h1 { font-size: 20px; } .md h2 { font-size: 17px; } .md h3 { font-size: 15px; } .md h4 { font-size: 14px; }
+  .md p, .md ul, .md ol, .md pre, .md table, .md blockquote { margin: 0 0 12px; }
+  .md ul, .md ol { padding-left: 22px; }
+  .md a { color: var(--accent); }
+  .md code { font: 12.5px ui-monospace, monospace; background: var(--bg); border-radius: 4px; padding: 1px 4px; }
+  .md pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
+  .md pre code { background: none; padding: 0; }
+  .md blockquote { border-left: 3px solid var(--line); padding-left: 12px; color: var(--muted); }
+  .md table { border-collapse: collapse; display: block; overflow-x: auto; }
+  .md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; }
+  .md img { max-width: 100%; }
+  .md hr { border: 0; border-top: 1px solid var(--line); }
+
+  /* Layers: alternating bands behind the graph with a solid line between them, labelled
+     in a gutter to its left. The label's halo matches the band it sits on. */
   .layer-band { fill: var(--layer-band); pointer-events: none; }
   .layer-line { stroke: var(--layer-line); stroke-width: 1.5; pointer-events: none; }
   .layer-label {
@@ -181,6 +221,7 @@
   .layer-toggle:hover rect, .layer-toggle:focus-visible rect { stroke: var(--line-hi); }
   .layer-toggle:hover text, .layer-toggle:focus-visible text, .layer-toggle.off text { fill: var(--text); }
   .layer-toggle.off rect { stroke: var(--lib); }
+  .lib-column { fill-opacity: 0.05; pointer-events: none; }
 
   #err { padding: 24px; color: #ff8f8f; font-family: ui-monospace, monospace; white-space: pre-wrap; }
   #err:empty { display: none; }
@@ -192,6 +233,7 @@
     <span class="mod" id="module"></span>
     <label class="toggle"><input type="checkbox" id="showImplied"> transitive imports</label>
     <label class="toggle"><input type="checkbox" id="showLibs" checked> external libraries</label>
+    <label class="toggle" id="supportToggle" hidden><input type="checkbox" id="showSupport" checked> support packages</label>
     <button type="button" class="btn" id="hideAll">hide all</button>
     <button type="button" class="btn" id="showAll" disabled>show all</button>
     <span class="legend" title="Arrow colours on a highlighted node"><i></i>imports<i class="in"></i>imported by</span>
@@ -202,7 +244,7 @@
   <dialog id="info" aria-labelledby="infoTitle">
     <div class="info-body">
       <h2 id="infoTitle"></h2>
-      <p id="infoText"></p>
+      <div id="infoText" class="md"></div>
       <form method="dialog"><button class="btn">close</button></form>
     </div>
   </dialog>
@@ -213,21 +255,40 @@ const NS = "http://www.w3.org/2000/svg";
 const COL_GAP = 44, ROW_GAP = 46, NODE_H = 38, PAD_X = 14;
 const BOX_PAD = 16, BOX_HEAD = 28, GAP_ROOT = 24; // left offset of the diagram
 const MARGIN_TOP = 30, MARGIN = 48;
-// Layers: extra space at a boundary, the line's height above the layer's content,
-// and the label's baseline above that content.
-const LAYER_GAP = 14, LAYER_HEAD = 36, LAYER_LABEL_UP = 10;
-const LAYER_BTN_W = 40, LAYER_BTN_H = 18, LAYER_BTN_GAP = 8; // the hide/show button left of the label
+// Layers: extra space at a boundary, and the line's height above the layer's content.
+const LAYER_GAP = 14, LAYER_HEAD = 30;
+// The gutter left of the graph holding each layer's name, description and button.
+const GUTTER_W = 188, GUTTER_PAD = 12;
+const NAME_LINE_H = 18, DESC_LINE_H = 15, NAME_CW = 8.2, DESC_CW = 6.4; // approx widths at 14px bold and 12px
+const LAYER_BTN_W = 40, LAYER_BTN_H = 18, LAYER_BTN_GAP = 8; // the hide/show button under the text
 const CHAR_W = 7.3;            // approx monospace node-label width at 12px
 const LABEL_CW = 8;             // approx box-label width at 13px bold
 const PORT_INSET = 0.7;         // fraction of node width arrows spread across
-const INFO_W = 20;              // extra node width holding the info button
-const nodeWidth = (label, info, min) => Math.max(min, label.length * CHAR_W + PAD_X * 2 + (info ? INFO_W : 0));
+// The buttons at a node's right end: each claims BTN_W of the node's width, takes
+// clicks in a BTN_HIT square inside it, and the last one sits BTN_INSET from the edge.
+const BTN_W = 28, BTN_HIT = 24, BTN_INSET = 6;
+const INFO_W = BTN_W;           // extra node width holding the info button
+const LOUPE_W = BTN_W;          // extra node width holding the loupe button
+const nodeWidth = (label, buttonsW, min, pad = PAD_X) => Math.max(min, label.length * CHAR_W + pad * 2 + buttonsW);
+// An expanded package: its symbol rows, and the lanes beside it where arrows to them
+// run. Layout reserves the lanes' room on both sides (`_laneRoom`). LANE_NEAR leaves the
+// innermost lane a stub long enough to show its arrowhead, and many importers squeeze
+// into LANE_ROOM_MAX rather than pushing their neighbours ever further away.
+const SYM_ROW_H = 20, SYM_PAD = 4, SYM_PAD_X = 10, SYM_INDENT = 14, SYM_MAX_W = 480;
+const SYM_CW = 6.6;             // approx monospace symbol width at 11px
+const NO_SYMBOLS = "no exported symbols";
+const LANE_NEAR = 22, LANE_STEP = 10, LANE_ROOM_MAX = 92, LANE_BEND = 6;
+// Importers sharing a row land side by side. Arrows sharing a gap or a package's lanes
+// turn at different heights: side by side at a shallow angle, they'd otherwise touch.
+const ROW_FAN = 7, ROW_FAN_MAX = 16, BEND_STAGGER = 12, BEND_STAGGER_ROOM = 0.6;
 // Routing: clearance around packages, spacing of arrows sharing a gap, and the
 // horizontal detour (px) worth taking to stay out of an unrelated folder.
 const GAP_MARGIN = 7, CHANNEL = 7, BOX_PENALTY = 220;
 const CURVE_STEP = 12;          // px between the samples that check a curve is clear
-// Libraries box (external deps) on the right.
-const LIB_GAP = 90, LIB_PAD = 16, LIB_HEAD = 36, LIB_VGAP = 12, LIB_COLOR = "#d8a657";
+// Libraries (external deps) on the right, in a box or, with layers, a column as narrow
+// as they allow: LIB_COL_PAD is its padding and that of the nodes inside it.
+const LIB_GAP = 90, LIB_PAD = 16, LIB_COL_PAD = 8, LIB_HEAD = 36, LIB_VGAP = 12, LIB_COLOR = "#d8a657";
+const LIB_HEADING = "libraries";
 // Dragging: pixels of movement before a press counts as a drag rather than a
 // click, and how close to the canvas's top/left edge anything may be dropped.
 const DRAG_MIN = 4, EDGE_MIN = 6;
@@ -242,6 +303,34 @@ function el(name, attrs) {
 }
 
 const topFolder = id => id === "." ? "" : id.replace(/^\.\//, "").split("/")[0];
+
+// Breaks text into lines at spaces, cutting a word only if it can't fit on a line.
+function wrapText(text, perLine) {
+  const lines = [];
+  let line = "";
+  for (let word of (text || "").split(/\s+/).filter(Boolean)) {
+    while (word.length > perLine) {
+      if (line) { lines.push(line); line = ""; }
+      lines.push(word.slice(0, perLine));
+      word = word.slice(perLine);
+    }
+    if (line && line.length + 1 + word.length > perLine) { lines.push(line); line = word; }
+    else line = line ? line + " " + word : word;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// A layer's text as gutter lines, and the height a band needs to hold it and the
+// button. The layer is undefined for the band of packages no layer lists.
+function gutterText(layer) {
+  const room = GUTTER_W - GUTTER_PAD * 2;
+  const name = wrapText(layer?.name, Math.floor(room / NAME_CW));
+  const description = wrapText(layer?.description, Math.floor(room / DESC_CW));
+  const textH = name.length * NAME_LINE_H + description.length * DESC_LINE_H;
+  const btnY = GUTTER_PAD + textH + (textH ? LAYER_BTN_GAP : 0);
+  return { name, description, btnY, h: btnY + LAYER_BTN_H + GUTTER_PAD };
+}
 
 // Build a folder tree from package ids. Each tree node is a directory; it may
 // carry a package (pkgId) and/or child directories.
@@ -312,11 +401,17 @@ function layoutPackages(g) {
 
   // Items: packages and folders. A folder holding a single package and nothing
   // else adds no information, so it collapses into a label like "internal/store".
+  const pkgItems = [];
   const pkgItem = (id, label) => {
     const nd = byId.get(id);
     nd._label = label;
-    nd._w = nodeWidth(label, nd.info, 70);
-    return { kind: "pkg", id, path: id, label, w: nd._w, ids: [id] };
+    nd._collapsedW = nodeWidth(label, BTN_INSET + LOUPE_W + (nd.readme ? INFO_W : 0), 70);
+    nd._w = nd._collapsedW;
+    nd._laneRoom = 0;
+    nd._h = NODE_H;
+    const item = { kind: "pkg", id, path: id, label, w: nd._w, ids: [id] };
+    pkgItems.push(item);
+    return item;
   };
   const boxes = []; // children before their parents; the last one is the root
   const toItem = (dir, prefix, depth) => {
@@ -457,33 +552,46 @@ function layoutPackages(g) {
   }
   // Each layer holding top-level items gets a band, topped by its highest row. Layers
   // listing only nested paths have no band of their own to mark. Boundaries get extra
-  // room for the line and label; the top row never starts one, so a graph without
-  // layers lays out exactly as it would otherwise.
+  // room for the line; the top row never starts one, and the gutter only exists with
+  // layers, so a graph without them lays out exactly as it would otherwise.
   const layerTop = new Map();
   for (const it of root.items) {
     const i = layerOf(it.path);
     layerTop.set(i, Math.max(layerTop.get(i) ?? -1, it.hi));
   }
-  const layerStarts = new Set(layerTop.values());
-  const rowY = new Array(maxRow + 1);
-  let y = MARGIN_TOP + head[maxRow] * BOX_HEAD;
-  for (let r = maxRow; r >= 0; r--) {
-    rowY[r] = y;
-    if (r > 0) y += NODE_H + foot[r] * BOX_PAD + head[r - 1] * BOX_HEAD + ROW_GAP + (layerStarts.has(r - 1) ? LAYER_GAP : 0);
-  }
-  for (const n of g.nodes) n._homeY = rowY[rowOf.get(n.id)];
+  const layerStartingAt = new Map([...layerTop].map(([i, top]) => [top, i]));
+  const gutter = g.layers.length ? GUTTER_W : 0;
+  const rootX = gutter + GAP_ROOT;
+  // Sets every package's home height and returns the layer dividers. A row is as tall
+  // as its tallest package, so an expanded package pushes the rows below it down. A
+  // band is at least as tall as its gutter text, so that can push them down too.
+  function placeRows() {
+    const rowH = new Array(maxRow + 1).fill(NODE_H);
+    for (const n of g.nodes) rowH[rowOf.get(n.id)] = Math.max(rowH[rowOf.get(n.id)], n._h);
+    const rowY = new Array(maxRow + 1);
+    let y = MARGIN_TOP + head[maxRow] * BOX_HEAD;
+    let bandEnd = gutterText(g.layers[layerStartingAt.get(maxRow)]).h;
+    for (let r = maxRow; r >= 0; r--) {
+      rowY[r] = y;
+      if (r === 0) break;
+      y += rowH[r] + foot[r] * BOX_PAD + head[r - 1] * BOX_HEAD + ROW_GAP;
+      if (!layerStartingAt.has(r - 1)) continue;
+      y += LAYER_GAP;
+      const lineY = () => y - head[r - 1] * BOX_HEAD - LAYER_HEAD;
+      y += Math.max(0, bandEnd - lineY());
+      bandEnd = lineY() + gutterText(g.layers[layerStartingAt.get(r - 1)]).h;
+    }
+    for (const n of g.nodes) n._homeY = rowY[rowOf.get(n.id)];
 
-  const dividers = !g.layers.length ? [] : [...layerTop]
-    .sort((p, q) => q[1] - p[1])
-    .map(([i, top], k) => {
-      const contentY = rowY[top] - head[top] * BOX_HEAD;
-      return {
+    return !g.layers.length ? [] : [...layerTop]
+      .sort((p, q) => q[1] - p[1])
+      .map(([i, top], k) => ({
         layer: g.layers[i],
-        topY: k ? contentY - LAYER_HEAD : 0, // the first band starts at the canvas's edge
-        labelY: contentY - LAYER_LABEL_UP,
+        topY: k ? rowY[top] - head[top] * BOX_HEAD - LAYER_HEAD : 0, // the first band starts at the canvas's edge
         ids: g.nodes.filter(n => layerOf(n.id) === i).map(n => n.id), // may be outside this band, if nested
-      };
-    });
+      }));
+  }
+  placeRows();
 
   // Columns. Two siblings only need to avoid each other when their row ranges
   // overlap; otherwise they may share x. So a sibling order gives a set of
@@ -518,7 +626,7 @@ function layoutPackages(g) {
     box.x = x;
     box.ox = x + (box.w - box.contentW) / 2;
     for (const it of box.items) {
-      if (it.kind === "pkg") byId.get(it.id)._x = box.ox + it.rx;
+      if (it.kind === "pkg") byId.get(it.id)._x = box.ox + it.rx + byId.get(it.id)._laneRoom;
       else place(it, box.ox + it.rx);
     }
   }
@@ -544,7 +652,7 @@ function layoutPackages(g) {
       }
     }
   }
-  const relayout = sweeps => { measure(root); place(root, GAP_ROOT); relax(sweeps); };
+  const relayout = sweeps => { measure(root); place(root, rootX); relax(sweeps); };
 
   // Ordering. Barycentre sweeps get stuck easily, so run them from many seeded
   // shuffles, polish with adjacent swaps, and keep the order with the fewest
@@ -576,7 +684,7 @@ function layoutPackages(g) {
   const libUses = new Map();
   for (const e of g.libEdges) libUses.set(e.from, (libUses.get(e.from) || 0) + 1);
   const barycentre = it => {
-    const right = root.w + LIB_GAP;
+    const right = gutter + root.w + LIB_GAP;
     let sum = 0, n = 0;
     for (const id of it.nbrs) { sum += centerX(byId.get(id)); n++; }
     for (const id of it.ids) { const k = libUses.get(id) || 0; sum += k * right; n += k; }
@@ -629,37 +737,181 @@ function layoutPackages(g) {
     if (currentCost < bestCost) { bestCost = currentCost; best = snapshot(); }
   }
   restore(best);
-  relayout(8);
-  for (const n of g.nodes) n._homeX = n._x;
-  return { root, right: GAP_ROOT + root.w, layerOf, dividers };
+  const layout = { root, layerOf, gutter };
+  // Re-derives the home spots for the packages' current sizes. Rows and the chosen
+  // order stay, so expanding a package moves things aside without rearranging them.
+  layout.reflow = () => {
+    for (const it of pkgItems) it.w = byId.get(it.id)._w + byId.get(it.id)._laneRoom * 2;
+    layout.dividers = placeRows();
+    relayout(8);
+    for (const n of g.nodes) n._homeX = n._x;
+    layout.right = rootX + root.w;
+  };
+  layout.reflow();
+  return layout;
 }
 
+let fetchedGraph = null; // /graph.json as fetched; currentGraph is the view of it on screen
+const views = new Map(); // "support packages" checked -> its view of fetchedGraph, laid out once
 let currentGraph = null;
 const hidden = new Set(); // package and library ids toggled off by the user; persists across re-renders
 const highlighted = new Set(); // package and library ids kept highlighted by the user; persists across re-renders
+const expanded = new Set(); // package ids showing their symbols; persists across re-renders
 const moved = new Map();  // node id -> {dx, dy} dragged away from its computed spot; persists across re-renders
 let justDragged = false;  // the press in progress became a drag, so its click must not toggle
+let symbols = null;       // the indexed /symbols.json, loaded when a package is first expanded
+let symbolsLoad = null;   // the load in progress or done; cleared on failure so a retry can fetch again
 
-function showInfo(heading, text) {
-  document.getElementById("infoTitle").textContent = heading;
-  document.getElementById("infoText").textContent = text;
-  document.getElementById("info").showModal();
+// The graph without its support code: the packages and libraries the config flags as
+// support, the imports touching them, and the libraries only they import. It is laid
+// out on its own, so the rest closes up. Nodes and edges are copies, because a layout
+// stores its results on them.
+function withoutSupport(g) {
+  const nodes = g.nodes.filter(n => !n.support).map(n => ({ ...n }));
+  const kept = new Set(nodes.map(n => n.id));
+  const libEdges = g.libEdges.filter(e => kept.has(e.from)).map(e => ({ ...e }));
+  const imported = new Set(libEdges.map(e => e.to));
+  const libs = g.libs.filter(l => !l.support && imported.has(l.id)).map(l => ({ ...l }));
+  const libIds = new Set(libs.map(l => l.id));
+  return {
+    module: g.module, layers: g.layers, nodes, libs,
+    edges: g.edges.filter(e => kept.has(e.from) && kept.has(e.to)).map(e => ({ ...e })),
+    libEdges: libEdges.filter(e => libIds.has(e.to)),
+  };
 }
 
-// The button at a node's right end. Its press must not reach the node: there it
-// would capture the pointer, which sends the click to the node and cycles it.
-function infoButton(nd, heading) {
-  const btn = el("g", { class: "info-btn", role: "button", tabindex: 0 });
-  btn.appendChild(el("circle", { cx: nd._w - INFO_W / 2 - 4, cy: NODE_H / 2, r: 8 }));
-  const t = el("text", { x: nd._w - INFO_W / 2 - 4, y: NODE_H / 2 });
+// Shows the view the "support packages" checkbox asks for. A view laid out earlier
+// keeps its layout, but packages may have been expanded or collapsed since.
+function showView() {
+  const withSupport = document.getElementById("showSupport").checked;
+  if (!views.has(withSupport)) views.set(withSupport, withSupport ? fetchedGraph : withoutSupport(fetchedGraph));
+  const view = views.get(withSupport);
+  const fresh = !view._layout;
+  view._layout ||= layoutPackages(view);
+  currentGraph = view;
+  if (!fresh || expanded.size) {
+    for (const n of view.nodes) sizeNode(n);
+    view._layout.reflow();
+  }
+  render(view);
+}
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error((await r.text()).trim() || url + ": " + r.status);
+  return r.json();
+}
+
+const symbolKey = (a, b) => a + "\n" + b;
+
+function loadSymbols() {
+  symbolsLoad ||= fetchJSON("symbols.json").then(s => {
+    const rows = new Map(s.packages.map(p => [p.id, p.symbols]));
+    const usedFrom = new Map(), usedBy = new Map(); // (from, to) -> symbol names; (to, symbol) -> importers
+    for (const u of s.uses) {
+      const pair = symbolKey(u.from, u.to), symbol = symbolKey(u.to, u.symbol);
+      (usedFrom.get(pair) || usedFrom.set(pair, []).get(pair)).push(u.symbol);
+      (usedBy.get(symbol) || usedBy.set(symbol, new Set()).get(symbol)).add(u.from);
+    }
+    symbols = { rows, usedFrom, usedBy };
+  }).catch(err => { symbolsLoad = null; throw err; });
+  return symbolsLoad;
+}
+
+const symbolIndent = s => s.name.includes(".") ? SYM_INDENT : 0; // a method sits under its type
+
+// Long signatures are cut to keep the graph readable; the row's tooltip has the rest.
+function sizeNode(nd) {
+  if (!expanded.has(nd.id)) { nd._w = nd._collapsedW; nd._h = NODE_H; nd._laneRoom = 0; return; }
+  const users = currentGraph.edges.filter(e => e.to === nd.id && symbols.usedFrom.has(symbolKey(e.from, e.to))).length;
+  nd._laneRoom = users ? Math.min(LANE_ROOM_MAX, LANE_NEAR + (users - 1) * LANE_STEP) : 0;
+  const rows = symbols.rows.get(nd.id) || [];
+  nd._h = NODE_H + SYM_PAD * 2 + Math.max(1, rows.length) * SYM_ROW_H;
+  const longest = Math.max(NO_SYMBOLS.length * SYM_CW, ...rows.map(s => s.signature.length * SYM_CW + symbolIndent(s)));
+  nd._w = Math.max(nd._collapsedW, Math.min(SYM_MAX_W, longest + SYM_PAD_X * 2));
+}
+
+// Expanding re-renders, so this keeps the package where it is on screen and the
+// keyboard focus on its button.
+async function toggleExpanded(nd, btn) {
+  if (expanded.has(nd.id)) {
+    expanded.delete(nd.id);
+  } else {
+    btn.classList.add("loading");
+    try {
+      await loadSymbols();
+    } catch (err) {
+      document.getElementById("err").textContent = String(err);
+      btn.classList.remove("loading");
+      return;
+    }
+    document.getElementById("err").textContent = "";
+    expanded.add(nd.id);
+  }
+  const [wasX, wasY] = [nd._x, nd._y];
+  sizeNode(nd);
+  currentGraph._layout.reflow();
+  render(currentGraph);
+  const wrap = document.getElementById("wrap");
+  wrap.scrollLeft += nd._x - wasX;
+  wrap.scrollTop += nd._y - wasY;
+  document.querySelector(`.loupe[data-pkg="${CSS.escape(nd.id)}"]`).focus({ preventScroll: true });
+}
+
+// Opens the dialog at once and fills it with the package's README when it arrives. The
+// server renders the markdown and drops any raw HTML in it, so it goes in as is.
+async function showReadme(nd) {
+  const body = document.getElementById("infoText");
+  document.getElementById("infoTitle").textContent = nd.pkg;
+  body.textContent = "loading…";
+  document.getElementById("info").showModal();
+  try {
+    const r = await fetch("readme?id=" + encodeURIComponent(nd.id));
+    if (!r.ok) throw new Error((await r.text()).trim() || "readme: " + r.status);
+    body.innerHTML = await r.text();
+  } catch (err) {
+    body.textContent = String(err);
+  }
+}
+
+// A button inside a node. Its press must not reach the node: there it would capture
+// the pointer, which sends the click to the node and cycles it.
+function nodeButton(cls, titleText, act) {
+  const btn = el("g", { class: cls, role: "button", tabindex: 0 });
+  const title = el("title"); title.textContent = titleText; btn.appendChild(title);
+  btn.addEventListener("pointerdown", ev => ev.stopPropagation());
+  btn.addEventListener("click", ev => { ev.stopPropagation(); act(); });
+  btn.addEventListener("keydown", ev => {
+    if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); act(); }
+  });
+  return btn;
+}
+
+// A transparent square under a button's strokes, so a click anywhere near it counts.
+const buttonHit = (cx, cy) => el("rect", { class: "hit", x: cx - BTN_HIT / 2, y: cy - BTN_HIT / 2, width: BTN_HIT, height: BTN_HIT });
+
+// The info button sits at a node's right end and shows the package's README.
+function infoButton(nd) {
+  const btn = nodeButton("info-btn", "Show the README", () => showReadme(nd));
+  const cx = nd._w - BTN_INSET - INFO_W / 2, cy = NODE_H / 2;
+  btn.appendChild(buttonHit(cx, cy));
+  btn.appendChild(el("circle", { cx, cy, r: 9 }));
+  const t = el("text", { x: cx, y: cy });
   t.textContent = "i";
   btn.appendChild(t);
-  const title = el("title"); title.textContent = "About " + heading; btn.appendChild(title);
-  btn.addEventListener("pointerdown", ev => ev.stopPropagation());
-  btn.addEventListener("click", ev => { ev.stopPropagation(); showInfo(heading, nd.info); });
-  btn.addEventListener("keydown", ev => {
-    if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); showInfo(heading, nd.info); }
-  });
+  return btn;
+}
+
+// The loupe sits left of the info button, if there is one.
+function loupeButton(nd) {
+  const on = expanded.has(nd.id);
+  const btn = nodeButton("loupe" + (on ? " on" : ""), `${on ? "Hide" : "Show"} exported symbols`, () => toggleExpanded(nd, btn));
+  btn.setAttribute("data-pkg", nd.id);
+  btn.setAttribute("aria-pressed", on);
+  const cx = nd._w - BTN_INSET - (nd.readme ? INFO_W : 0) - LOUPE_W / 2, cy = NODE_H / 2;
+  btn.appendChild(buttonHit(cx, cy));
+  btn.appendChild(el("circle", { cx: cx - 1.5, cy: cy - 1.5, r: 4.5 }));
+  btn.appendChild(el("line", { x1: cx + 1.8, y1: cy + 1.8, x2: cx + 5.5, y2: cy + 5.5 }));
   return btn;
 }
 
@@ -691,7 +943,12 @@ function render(g) {
   const topColor = new Map(topBoxes.map((nm, i) => [nm, groupColor(i)]));
 
   const boxes = []; // every drawn box, parents before their children
-  const nodeRect = nd => ({ x: nd._x, y: nd._y, w: nd._w, h: NODE_H });
+  // The space a node claims: an expanded package's lanes count, so boxes wrap them, the
+  // canvas holds them, and arrows just passing by keep out. Libraries have no lanes.
+  const nodeRect = nd => {
+    const room = nd._laneRoom || 0;
+    return { x: nd._x - room, y: nd._y, w: nd._w + room * 2, h: nd._h };
+  };
   const centerX = nd => nd._x + nd._w / 2;
 
   (function addBoxes(item, color, owner) {
@@ -718,14 +975,25 @@ function render(g) {
   })(layout.root, null, null);
   const folderBoxes = [...boxes];
 
-  // Libraries box on the right (optional). Each lib sits level with the mean height
+  // Libraries on the right (optional). They aren't layered, so with layers a vertical
+  // line cuts them off from the bands into a column of their own, only as wide as they
+  // need and at the window's right edge, so the bands get the rest. Without layers there
+  // is no grid to cut and they sit in a box. Each lib sits level with the mean height
   // of the packages importing it, pushed down only as far as needed to not overlap.
   const libById = new Map(g.libs.map(l => [l.id, l]));
-  let libBox = null;
-  if (showLibs && g.libs.length) {
-    for (const l of g.libs) l._w = nodeWidth(l.label, l.info, 90);
+  const libsShown = showLibs && g.libs.length > 0;
+  let libCutX = null;
+  if (libsShown) {
+    for (const l of g.libs) {
+      l._w = layout.gutter ? nodeWidth(l.label, 0, LIB_HEADING.length * LABEL_CW, LIB_COL_PAD) : nodeWidth(l.label, 0, 90);
+      l._h = NODE_H;
+    }
     const libW = Math.max(...g.libs.map(l => l._w));
-    const libX = layout.right + LIB_GAP + LIB_PAD;
+    if (layout.gutter) {
+      const windowW = document.getElementById("wrap").clientWidth;
+      libCutX = Math.max(layout.right + GAP_ROOT, windowW - libW - LIB_COL_PAD * 2);
+    }
+    const libX = libCutX === null ? layout.right + LIB_GAP + LIB_PAD : libCutX + LIB_COL_PAD;
     const ys = new Map(g.libs.map(l => [l.id, []]));
     for (const e of g.libEdges) {
       const a = byId.get(e.from);
@@ -740,19 +1008,20 @@ function render(g) {
       l._y = Math.max(floor, isFinite(want) ? want : floor);
       floor = l._y + NODE_H + LIB_VGAP;
     }
-    libBox = {
-      label: "libraries", color: LIB_COLOR, labelX: 14, labelY: 23,
-      fillOpacity: 0.05, strokeOpacity: 0.35,
-      pad: LIB_PAD, head: LIB_HEAD, minW: 0,
-      nodes: g.libs, kids: [], members: g.libs,
-    };
-    boxes.push(libBox);
+    if (libCutX === null) {
+      boxes.push({
+        label: LIB_HEADING, color: LIB_COLOR, labelX: 14, labelY: 23,
+        fillOpacity: 0.05, strokeOpacity: 0.35,
+        pad: LIB_PAD, head: LIB_HEAD, minW: 0,
+        nodes: g.libs, kids: [], members: g.libs,
+      });
+    }
   }
 
   // Everything above computes each node's home spot, so re-renders stay stable;
   // the user's drags are applied on top of it. The libs were ordered by the home
   // spots too, so moving a package never reshuffles them.
-  const shownNodes = libBox ? [...g.nodes, ...g.libs] : g.nodes;
+  const shownNodes = libsShown ? [...g.nodes, ...g.libs] : g.nodes;
   for (const nd of shownNodes) {
     const o = moved.get(nd.id);
     if (o) { nd._x += o.dx; nd._y += o.dy; }
@@ -777,12 +1046,7 @@ function render(g) {
   fitBoxes();
 
   const allRects = () => [...shownNodes.map(nodeRect), ...boxes];
-  const layerText = layer => [layer?.name, layer?.description].filter(Boolean);
-  const layerLabelX = GAP_ROOT + LAYER_BTN_W + LAYER_BTN_GAP;
-  const layerLabelRects = layout.dividers.map(d => ({
-    x: layerLabelX, y: d.labelY,
-    w: layerText(d.layer).join(" — ").length * CHAR_W, h: 0,
-  }));
+  const gutterRects = layout.dividers.map(d => ({ x: 0, y: d.topY, w: GUTTER_W, h: gutterText(d.layer).h }));
 
   document.getElementById("stats").textContent =
     `${g.nodes.length} packages · ${topBoxes.length} groups · ${g.libs.length} libraries`;
@@ -791,8 +1055,8 @@ function render(g) {
   // While dragging the canvas only grows: shrinking it could clamp the scroll
   // position and slide the content out from under the pointer.
   function fitCanvas(growOnly) {
-    const rects = [...allRects(), ...layerLabelRects];
-    let w = Math.max(0, ...rects.map(r => r.x + r.w)) + MARGIN;
+    const rects = [...allRects(), ...gutterRects];
+    let w = Math.max(0, ...rects.map(r => r.x + r.w)) + (libCutX === null ? MARGIN : LIB_COL_PAD);
     let h = Math.max(0, ...rects.map(r => r.y + r.h)) + MARGIN;
     if (growOnly) {
       w = Math.max(w, Number(svg.getAttribute("width")));
@@ -816,12 +1080,22 @@ function render(g) {
 
   // Bands and lines stay at the layer's home spot: they mark the configured layout,
   // so dragging packages away doesn't move them. Every other band is tinted. The last
-  // one runs off the canvas, so it still reaches the bottom when a drag grows it.
+  // one runs off the canvas, so it still reaches the bottom when a drag grows it. They
+  // stop at the libraries' column, as libraries belong to no layer.
+  const bandRight = libCutX ?? "100%";
   layout.dividers.forEach((d, k) => {
     const next = layout.dividers[k + 1];
-    if (k % 2) svg.appendChild(el("rect", { class: "layer-band", x: 0, y: d.topY, width: "100%", height: next ? next.topY - d.topY : "100%" }));
-    if (k) svg.appendChild(el("line", { class: "layer-line", x1: 0, x2: "100%", y1: d.topY, y2: d.topY }));
+    if (k % 2) svg.appendChild(el("rect", { class: "layer-band", x: 0, y: d.topY, width: bandRight, height: next ? next.topY - d.topY : "100%" }));
+    if (k) svg.appendChild(el("line", { class: "layer-line", x1: 0, x2: bandRight, y1: d.topY, y2: d.topY }));
   });
+  if (layout.gutter) svg.appendChild(el("line", { class: "layer-line", x1: layout.gutter, x2: layout.gutter, y1: 0, y2: "100%" }));
+  if (libCutX !== null) {
+    svg.appendChild(el("rect", { class: "lib-column", x: libCutX, y: 0, width: "100%", height: "100%", fill: LIB_COLOR }));
+    svg.appendChild(el("line", { class: "layer-line", x1: libCutX, x2: libCutX, y1: 0, y2: "100%" }));
+    const heading = el("text", { class: "box-label", fill: LIB_COLOR, x: libCutX + LIB_COL_PAD, y: MARGIN_TOP });
+    heading.textContent = LIB_HEADING;
+    svg.appendChild(heading);
+  }
 
   // Boxes (outer first so nested boxes sit on top). Deeper folder boxes are
   // slightly more opaque so the nesting reads.
@@ -857,7 +1131,7 @@ function render(g) {
 
   // Library edges: package right side -> lib left side.
   const libDrawn = [];
-  if (libBox) {
+  if (libsShown) {
     for (const e of g.libEdges) {
       const a = byId.get(e.from), l = libById.get(e.to);
       if (a && l) libDrawn.push({ a, l, path: addEdgePath(e, "lib") });
@@ -869,9 +1143,25 @@ function render(g) {
     .map(e => ({ e, a: byId.get(e.from), b: byId.get(e.to) }))
     .filter(x => x.a && x.b)
     .sort((p, q) => Number(q.e.implied) - Number(p.e.implied));
+  // An import of an expanded package splits into a trunk with no arrowhead, routed
+  // like any import, and a branch from its end to each symbol it references. They show
+  // even if the import is implied, or the package's list of users would have holes. An
+  // import referencing nothing, such as a blank one, stays a plain arrow.
   for (const x of drawn) {
     const cross = topFolder(x.a.id) !== topFolder(x.b.id) ? "cross" : "";
-    x.path = addEdgePath(x.e, `${cross} ${x.e.implied ? "implied" : ""}`);
+    const implied = x.e.implied ? "implied" : "";
+    const names = expanded.has(x.b.id) ? symbols.usedFrom.get(symbolKey(x.e.from, x.e.to)) || [] : [];
+    x.path = addEdgePath(x.e, `${cross} ${implied} ${names.length ? "symbol" : ""}`);
+    x.branches = [];
+    if (!names.length) continue;
+    x.path.removeAttribute("marker-end");
+    x.path._symbols = new Set(names);
+    const rows = symbols.rows.get(x.b.id);
+    x.branches = names.map(name => {
+      const path = addEdgePath(x.e, `${cross} ${implied} symbol`);
+      path._symbols = new Set([name]);
+      return { path, row: rows.findIndex(s => s.name === name) };
+    });
   }
 
   // Routing works from wherever the nodes are now, so it holds up under dragging.
@@ -883,9 +1173,9 @@ function render(g) {
       const last = bands[bands.length - 1];
       if (last && n._y < last.bottom) {
         last.nodes.push(n);
-        last.bottom = Math.max(last.bottom, n._y + NODE_H);
+        last.bottom = Math.max(last.bottom, n._y + n._h);
       } else {
-        bands.push({ top: n._y, bottom: n._y + NODE_H, nodes: [n] });
+        bands.push({ top: n._y, bottom: n._y + n._h, nodes: [n] });
       }
     }
     for (const band of bands) {
@@ -893,8 +1183,9 @@ function render(g) {
       band.gaps = [];
       let left = -Infinity;
       for (const n of band.nodes) {
-        if (n._x - GAP_MARGIN >= left) band.gaps.push([left, n._x - GAP_MARGIN]);
-        left = Math.max(left, n._x + n._w + GAP_MARGIN);
+        const r = nodeRect(n);
+        if (r.x - GAP_MARGIN >= left) band.gaps.push([left, r.x - GAP_MARGIN]);
+        left = Math.max(left, r.x + r.w + GAP_MARGIN);
       }
       band.gaps.push([left, Infinity]);
     }
@@ -903,12 +1194,14 @@ function render(g) {
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const inBox = (x, y, b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h;
   const unrelated = (b, e) => !b.memberIds.has(e.from) && !b.memberIds.has(e.to);
+  const laneX = (nd, side, offset) => side < 0 ? nd._x - offset : nd._x + nd._w + offset;
 
   // Picks a gap in every band an arrow must cross: a small shortest-path search
   // that prefers staying straight and staying out of folders it has no part in.
   function chooseWay(x, bands) {
     const { upper, lower, e } = x;
-    const x1 = centerX(upper), y1 = upper._y + NODE_H, x2 = centerX(lower), y2 = lower._y;
+    const aim = nd => x.side && nd === x.b ? laneX(nd, x.side, nd._laneRoom) : centerX(nd);
+    const x1 = aim(upper), y1 = upper._y + upper._h, x2 = aim(lower), y2 = lower._y;
     let layer = [{ x: x1, cost: 0, prev: null }];
     for (const band of bands) {
       if (band.top < y1 || band.bottom > y2) continue;
@@ -936,8 +1229,7 @@ function render(g) {
 
   // True when the S-curve between two points touches no other package and enters
   // no unrelated folder, so any waypoints between them can be dropped.
-  function curveIsClear(p, q, x, bands) {
-    const my = (p.y + q.y) / 2;
+  function curveIsClear(p, q, my, x, bands) {
     const steps = Math.ceil((Math.abs(q.x - p.x) + q.y - p.y) / CURVE_STEP); // fine enough to never skip a node
     for (let k = 1; k < steps; k++) {
       const t = k / steps, s = 1 - t;
@@ -947,7 +1239,8 @@ function render(g) {
         if (cy < band.top - GAP_MARGIN || cy > band.bottom + GAP_MARGIN) continue;
         for (const n of band.nodes) {
           if (n === x.a || n === x.b) continue;
-          if (cx > n._x - GAP_MARGIN && cx < n._x + n._w + GAP_MARGIN) return false;
+          const r = nodeRect(n);
+          if (cx > r.x - GAP_MARGIN && cx < r.x + r.w + GAP_MARGIN) return false;
         }
       }
       for (const fb of folderBoxes) if (unrelated(fb, x.e) && inBox(cx, cy, fb)) return false;
@@ -955,22 +1248,21 @@ function render(g) {
     return true;
   }
 
-  const sCurve = (px, py, qx, qy) => {
-    const my = (py + qy) / 2;
-    return `C${px},${my} ${qx},${my} ${qx},${qy}`;
-  };
+  const sCurve = (px, py, qx, qy, my) => `C${px},${my} ${qx},${my} ${qx},${qy}`;
 
   // Arrows share gaps without overlapping, leave and land at distinct ports ordered
   // by direction, and keep only the waypoints they need. Hidden arrows are routed
   // too, so turning them on or hovering them moves nothing else. An import can point
   // up, through a configured layer or a drag, so routes run from the upper package
-  // to the lower one and the path is reversed for those.
+  // to the lower one and the path is reversed for those. A trunk ends beside its
+  // expanded package's corner, on the importer's side, in a lane of its own.
   function routeProjectEdges(bands) {
     const channels = new Map();
     for (const x of drawn) {
-      x.up = x.a._y > x.b._y + NODE_H;
+      x.up = x.a._y > x.b._y + x.b._h;
       [x.upper, x.lower] = x.up ? [x.b, x.a] : [x.a, x.b];
-      x.way = x.lower._y > x.upper._y + NODE_H ? chooseWay(x, bands) : [];
+      x.side = !x.branches.length ? 0 : centerX(x.a) <= centerX(x.b) ? -1 : 1;
+      x.way = x.lower._y > x.upper._y + x.upper._h ? chooseWay(x, bands) : [];
       for (const w of x.way) {
         const k = bands.indexOf(w.band) + ":" + w.gap;
         (channels.get(k) || channels.set(k, []).get(k)).push(w);
@@ -984,36 +1276,84 @@ function render(g) {
       const span = step * (group.length - 1);
       const mean = group.reduce((s, w) => s + w.x, 0) / group.length;
       const start = clamp(mean - span / 2, lo, hi - span);
-      group.forEach((w, i) => { w.x = start + i * step; });
+      group.forEach((w, i) => {
+        w.x = start + i * step;
+        w.rank = i - (group.length - 1) / 2;
+      });
     }
     const port = (nd, i, n) => nd._x + nd._w * (0.5 + PORT_INSET * ((i + 1) / (n + 1) - 0.5));
-    const outgoing = new Map(), incoming = new Map();
+    const outgoing = new Map(), incoming = new Map(), beside = new Map();
     for (const x of drawn) {
-      (outgoing.get(x.upper) || outgoing.set(x.upper, []).get(x.upper)).push(x);
-      (incoming.get(x.lower) || incoming.set(x.lower, []).get(x.lower)).push(x);
+      if (x.side) {
+        const k = symbolKey(x.b.id, x.side);
+        (beside.get(k) || beside.set(k, []).get(k)).push(x);
+      }
+      if (!x.side || !x.up) (outgoing.get(x.upper) || outgoing.set(x.upper, []).get(x.upper)).push(x);
+      if (!x.side || x.up) (incoming.get(x.lower) || incoming.set(x.lower, []).get(x.lower)).push(x);
     }
+    const aimDown = x => x.way.length ? x.way[0].x : centerX(x.lower);
+    const aimUp = x => x.way.length ? x.way[x.way.length - 1].x : centerX(x.upper);
     for (const [nd, group] of outgoing) {
-      const aim = x => x.way.length ? x.way[0].x : centerX(x.lower);
-      group.sort((p, q) => aim(p) - aim(q) || p.lower.id.localeCompare(q.lower.id));
+      group.sort((p, q) => aimDown(p) - aimDown(q) || p.lower.id.localeCompare(q.lower.id));
       group.forEach((x, i) => { x.x1 = port(nd, i, group.length); });
     }
     for (const [nd, group] of incoming) {
-      const from = x => x.way.length ? x.way[x.way.length - 1].x : centerX(x.upper);
-      group.sort((p, q) => from(p) - from(q) || p.upper.id.localeCompare(q.upper.id));
+      group.sort((p, q) => aimUp(p) - aimUp(q) || p.upper.id.localeCompare(q.upper.id));
       group.forEach((x, i) => { x.x2 = port(nd, i, group.length); });
     }
+    // Trunks reach their lanes without crossing if the one arriving furthest out takes
+    // the outermost lane, and the further one has come, the later it turns. A trunk over
+    // the package counts as inward, so of those the nearest takes the outermost lane.
+    for (const group of beside.values()) {
+      const outward = x => ((x.up ? aimDown(x) : aimUp(x)) - laneX(x.b, x.side, 0)) * x.side;
+      group.sort((p, q) => outward(q) - outward(p) || p.a.id.localeCompare(q.a.id));
+      const last = group.length - 1;
+      [...group].sort((p, q) => Math.abs(outward(p)) - Math.abs(outward(q))).forEach((x, i) => {
+        x.stagger = last ? (i - last / 2) / last : 0; // nearest -0.5, furthest +0.5
+      });
+      const step = last ? Math.min(LANE_STEP, (group[0].b._laneRoom - LANE_NEAR) / last) : 0;
+      const byRow = new Map();
+      group.forEach((x, i) => {
+        x.lane = laneX(x.b, x.side, LANE_NEAR + (last - i) * step);
+        if (x.up) x.x1 = x.lane; else x.x2 = x.lane;
+        x.staggerSpan = last * BEND_STAGGER;
+        for (const branch of x.branches) {
+          (byRow.get(branch.row) || byRow.set(branch.row, []).get(branch.row)).push({ branch, order: x.up ? i : -i });
+        }
+      });
+      // A lane that has already ended can't be crossed, so the lane ending first lands
+      // first: from the top the inner ones do, and from the bottom the outer ones.
+      for (const users of byRow.values()) {
+        users.sort((p, q) => p.order - q.order);
+        const gaps = users.length - 1;
+        const fan = gaps ? Math.min(ROW_FAN, ROW_FAN_MAX / gaps) : 0;
+        users.forEach(({ branch }, k) => { branch.fan = (k - gaps / 2) * fan; });
+      }
+    }
     for (const x of drawn) {
-      const start = { x: x.x1, y: x.upper._y + NODE_H }, end = { x: x.x2, y: x.lower._y };
-      const entry = w => ({ x: w.x, y: w.band.top - 2 });
-      const exit = w => ({ x: w.x, y: w.band.bottom + 2 });
+      const start = { x: x.x1, y: x.upper._y + x.upper._h }, end = { x: x.x2, y: x.lower._y };
+      const entry = w => ({ x: w.x, y: w.band.top - 2, rank: w.rank });
+      const exit = w => ({ x: w.x, y: w.band.bottom + 2, rank: w.rank });
+      // A curve turns about halfway. The one reaching a lane turns at its trunk's height;
+      // others leaving or reaching a shared gap turn in the order they sit in it, the one
+      // in front of the direction of travel first, so the one behind passes underneath.
+      const bendY = (p, q) => {
+        const mid = (p.y + q.y) / 2, room = (q.y - p.y) * BEND_STAGGER_ROOM;
+        if (x.side && (x.up ? p === start : q === end)) {
+          return mid + (x.up ? -x.stagger : x.stagger) * Math.min(x.staggerSpan, room);
+        }
+        const shift = clamp((q.rank ?? p.rank ?? 0) * BEND_STAGGER, -room / 2, room / 2);
+        return mid - Math.sign(q.x - p.x) * shift;
+      };
+      const stop = k => k === x.way.length ? end : entry(x.way[k]);
       const pieces = [];
       let from = start, i = 0;
       while (i <= x.way.length) {
         // Jump to the furthest later point reachable by one clear curve.
         let j = x.way.length;
-        while (j > i && !curveIsClear(from, j === x.way.length ? end : entry(x.way[j]), x, bands)) j--;
-        const to = j === x.way.length ? end : entry(x.way[j]);
-        pieces.push({ from, to, curve: true });
+        while (j > i && !curveIsClear(from, stop(j), bendY(from, stop(j)), x, bands)) j--;
+        const to = stop(j);
+        pieces.push({ from, to, curve: true, my: bendY(from, to) });
         if (j === x.way.length) break;
         const out = exit(x.way[j]);
         pieces.push({ from: to, to: out, curve: false });
@@ -1023,9 +1363,16 @@ function render(g) {
       const ordered = x.up ? pieces.reverse().map(p => ({ ...p, from: p.to, to: p.from })) : pieces;
       let d = `M${ordered[0].from.x},${ordered[0].from.y}`;
       for (const p of ordered) {
-        d += p.curve ? " " + sCurve(p.from.x, p.from.y, p.to.x, p.to.y) : ` L${p.to.x},${p.to.y}`;
+        d += p.curve ? " " + sCurve(p.from.x, p.from.y, p.to.x, p.to.y, p.my) : ` L${p.to.x},${p.to.y}`;
       }
       x.path.setAttribute("d", d);
+      for (const { path, row, fan } of x.branches) {
+        const y0 = x.up ? x.b._y + x.b._h : x.b._y;
+        const y = x.b._y + NODE_H + SYM_PAD + (row + 0.5) * SYM_ROW_H + fan;
+        // Along the lane, round the corner, then straight into the row.
+        const alongY = y + (x.up ? LANE_BEND : -LANE_BEND), inX = x.lane - x.side * LANE_BEND;
+        path.setAttribute("d", `M${x.lane},${y0} L${x.lane},${alongY} Q${x.lane},${y} ${inX},${y} L${laneX(x.b, x.side, 0)},${y}`);
+      }
     }
   }
 
@@ -1041,10 +1388,10 @@ function render(g) {
   // A band can hold no package of its own layer: its folder's packages may all be
   // listed under other layers. Then there is nothing for a button to toggle.
   const layerToggles = [];
-  function addLayerToggle(d) {
+  function addLayerToggle(d, y) {
     const btn = el("g", { class: "layer-toggle", role: "button", tabindex: 0 });
-    btn.appendChild(el("rect", { x: GAP_ROOT, y: d.labelY - 4 - LAYER_BTN_H / 2, width: LAYER_BTN_W, height: LAYER_BTN_H, rx: 5 }));
-    const text = el("text", { x: GAP_ROOT + LAYER_BTN_W / 2, y: d.labelY - 4 });
+    btn.appendChild(el("rect", { x: GUTTER_PAD, y, width: LAYER_BTN_W, height: LAYER_BTN_H, rx: 5 }));
+    const text = el("text", { x: GUTTER_PAD + LAYER_BTN_W / 2, y: y + LAYER_BTN_H / 2 });
     btn.appendChild(text);
     const title = el("title");
     btn.appendChild(title);
@@ -1056,32 +1403,68 @@ function render(g) {
     layerToggles.push({ btn, text, title, ids: d.ids, name: d.layer?.name || "this layer" });
   }
 
-  // Layer labels go over the arrows so they stay readable, but under the packages.
+  // Gutter text goes over the arrows, as one that bends far enough left can reach it.
   layout.dividers.forEach((d, k) => {
-    if (d.ids.length) addLayerToggle(d);
-    const [name, description] = [d.layer?.name, d.layer?.description];
-    if (!name && !description) return;
-    const label = el("text", { class: "layer-label" + (k % 2 ? " alt" : ""), x: layerLabelX, y: d.labelY });
-    if (name) {
-      const nameEl = el("tspan", { class: "layer-name" });
-      nameEl.textContent = name;
-      label.appendChild(nameEl);
-    }
-    if (description) label.appendChild(document.createTextNode((name ? " — " : "") + description));
+    const { name, description, btnY } = gutterText(d.layer);
+    if (d.ids.length) addLayerToggle(d, d.topY + btnY);
+    if (!name.length && !description.length) return;
+    const label = el("text", { class: "layer-label" + (k % 2 ? " alt" : "") });
+    let bottom = d.topY + GUTTER_PAD;
+    const addLines = (lines, lineH, cls) => {
+      for (const line of lines) {
+        bottom += lineH;
+        const span = el("tspan", { class: cls, x: GUTTER_PAD, y: bottom - 4 });
+        span.textContent = line;
+        label.appendChild(span);
+      }
+    };
+    addLines(name, NAME_LINE_H, "layer-name");
+    addLines(description, DESC_LINE_H, "");
     svg.appendChild(label);
   });
 
   const nodeEls = new Map();
+  const symbolRowEls = [];
   const syncNode = nd => nodeEls.get(nd.id).setAttribute("transform", `translate(${nd._x},${nd._y})`);
+  // An expanded package's rows, under a rule below its usual label. A row's press and
+  // click reach the node, so it drags and cycles the package like the rest of it.
+  function addSymbolRows(gEl, nd) {
+    gEl.appendChild(el("line", { class: "sym-rule", x1: 0, x2: nd._w, y1: NODE_H, y2: NODE_H }));
+    const rows = symbols.rows.get(nd.id) || [];
+    if (!rows.length) {
+      const empty = el("text", { class: "sym-empty", x: SYM_PAD_X, y: NODE_H + SYM_PAD + SYM_ROW_H / 2 });
+      empty.textContent = NO_SYMBOLS;
+      gEl.appendChild(empty);
+    }
+    rows.forEach((s, i) => {
+      const rowEl = el("g", { class: "sym-row" });
+      const y = NODE_H + SYM_PAD + i * SYM_ROW_H, indent = symbolIndent(s);
+      rowEl.appendChild(el("rect", { x: 1, y, width: nd._w - 2, height: SYM_ROW_H }));
+      const text = el("text", { x: SYM_PAD_X + indent, y: y + SYM_ROW_H / 2 });
+      const room = Math.floor((nd._w - SYM_PAD_X * 2 - indent) / SYM_CW);
+      text.textContent = s.signature.length > room ? s.signature.slice(0, room - 1) + "…" : s.signature;
+      rowEl.appendChild(text);
+      const title = el("title"); title.textContent = s.signature; rowEl.appendChild(title);
+      rowEl.addEventListener("mouseenter", () => highlightSymbol(nd.id, s.name));
+      rowEl.addEventListener("mouseleave", () => highlight(nd.id));
+      gEl.appendChild(rowEl);
+      symbolRowEls.push({ rowEl, users: symbols.usedBy.get(symbolKey(nd.id, s.name)) || new Set() });
+    });
+  }
   const addNode = (id, label, cls, titleText) => {
-    const nd = byId.get(id) || libById.get(id);
+    const isPkg = byId.has(id);
+    const nd = isPkg ? byId.get(id) : libById.get(id);
     const gEl = el("g", { class: cls });
-    gEl.appendChild(el("rect", { width: nd._w, height: NODE_H, rx: 7 }));
-    const t = el("text", { x: (nd._w - (nd.info ? INFO_W : 0)) / 2, y: NODE_H / 2 });
+    gEl.appendChild(el("rect", { width: nd._w, height: nd._h, rx: 7 }));
+    const hasReadme = isPkg && nd.readme;
+    const buttonsW = isPkg ? BTN_INSET + LOUPE_W + (hasReadme ? INFO_W : 0) : 0;
+    const t = el("text", { x: (nd._w - buttonsW) / 2, y: NODE_H / 2 });
     t.textContent = label;
     gEl.appendChild(t);
     const title = el("title"); title.textContent = titleText; gEl.appendChild(title);
-    if (nd.info) gEl.appendChild(infoButton(nd, titleText));
+    if (hasReadme) gEl.appendChild(infoButton(nd));
+    if (isPkg) gEl.appendChild(loupeButton(nd));
+    if (expanded.has(id)) addSymbolRows(gEl, nd);
     gEl.addEventListener("mouseenter", () => highlight(id));
     gEl.addEventListener("mouseleave", clear);
     gEl.addEventListener("click", () => { if (!justDragged) cycleNode(id); });
@@ -1094,7 +1477,7 @@ function render(g) {
     const entry = n.name === "main" || g.layers[layout.layerOf(n.id)]?.entrypoint;
     addNode(n.id, n._label, "node" + (entry ? " entry" : ""), n.pkg);
   }
-  if (libBox) for (const l of g.libs) addNode(l.id, l.label, "node lib", l.id);
+  if (libsShown) for (const l of g.libs) addNode(l.id, l.label, "node lib", l.id);
 
   // Shift nodes by the given amount, recording it so it survives re-renders.
   function shiftNodes(nodes, dx, dy) {
@@ -1107,12 +1490,12 @@ function render(g) {
     fitBoxes();
   }
 
-  // Move nodes, stopping short of the top/left edge (the canvas only extends
-  // right and down). Returns how far they actually went.
+  // Move nodes, stopping short of the top edge and of the left edge or gutter (the
+  // canvas only extends right and down). Returns how far they actually went.
   function moveNodes(nodes, dx, dy) {
     shiftNodes(nodes, dx, dy);
     const rects = allRects();
-    const backX = Math.max(0, EDGE_MIN - Math.min(...rects.map(r => r.x)));
+    const backX = Math.max(0, layout.gutter + EDGE_MIN - Math.min(...rects.map(r => r.x)));
     const backY = Math.max(0, EDGE_MIN - Math.min(...rects.map(r => r.y)));
     if (backX || backY) shiftNodes(nodes, backX, backY);
     return [dx + backX, dy + backY];
@@ -1170,7 +1553,7 @@ function render(g) {
   const neighbors = new Map();
   const add = (k, v) => (neighbors.get(k) || neighbors.set(k, new Set()).get(k)).add(v);
   for (const e of g.edges) { add(e.from, e.to); add(e.to, e.from); }
-  if (libBox) for (const e of g.libEdges) { add(e.from, e.to); add(e.to, e.from); }
+  if (libsShown) for (const e of g.libEdges) { add(e.from, e.to); add(e.to, e.from); }
 
   // A toggled-off node is greyed in place and every edge touching it is hidden.
   const edgeOff = p => hidden.has(p._from) || hidden.has(p._to);
@@ -1222,12 +1605,32 @@ function render(g) {
     for (const p of edgeEls) {
       const leaving = lit.has(p._from);
       const touches = leaving || lit.has(p._to);
-      const on = !edgeOff(p) && touches;
-      p.classList.toggle("hi", on);
-      p.classList.toggle("in", on && !leaving);
-      p.classList.toggle("dim", !edgeOff(p) && lit.size > 0 && !touches);
-      p.setAttribute("marker-end", !on ? "url(#arrow)" : leaving ? "url(#arrow-hi)" : "url(#arrow-in)");
+      paintEdge(p, !edgeOff(p) && touches, leaving, lit.size > 0 && !touches);
     }
+    // The rows a lit importer references, in every package it has expanded.
+    for (const { rowEl, users } of symbolRowEls) rowEl.classList.toggle("hi", [...users].some(u => lit.has(u)));
+  }
+  function paintEdge(p, on, leaving, dim) {
+    p.classList.toggle("hi", on);
+    p.classList.toggle("in", on && !leaving);
+    p.classList.toggle("dim", !edgeOff(p) && dim);
+    if (p.hasAttribute("marker-end")) p.setAttribute("marker-end", !on ? "url(#arrow)" : leaving ? "url(#arrow-hi)" : "url(#arrow-in)");
+  }
+  // A hovered row narrows the package's highlight down to that symbol: its arrows and
+  // the packages they come from. Everything else dims, including highlighted nodes.
+  function highlightSymbol(id, name) {
+    if (hidden.has(id)) return;
+    const users = symbols.usedBy.get(symbolKey(id, name)) || new Set();
+    nodeEls.forEach((el, nid) => {
+      const off = hidden.has(nid);
+      el.classList.toggle("dim", !off && nid !== id && !users.has(nid));
+      el.classList.toggle("hi", !off && nid === id);
+    });
+    for (const p of edgeEls) {
+      const on = !edgeOff(p) && p._to === id && !!p._symbols?.has(name);
+      paintEdge(p, on, false, !on);
+    }
+    for (const { rowEl } of symbolRowEls) rowEl.classList.remove("hi");
   }
   function clear() {
     highlight();
@@ -1251,16 +1654,21 @@ document.getElementById("info").addEventListener("click", ev => {
   if (ev.target === ev.currentTarget) ev.currentTarget.close();
 });
 document.getElementById("showLibs").addEventListener("change", () => { if (currentGraph) render(currentGraph); });
+document.getElementById("showSupport").addEventListener("change", () => { if (fetchedGraph) showView(); });
+// The libraries' column follows the window's right edge.
+window.addEventListener("resize", () => { if (currentGraph?._layout.gutter) render(currentGraph); });
 document.getElementById("showImplied").addEventListener("change", ev => {
   document.body.classList.toggle("show-implied", ev.target.checked);
 });
 
-fetch("graph.json")
-  .then(async r => {
-    if (!r.ok) throw new Error((await r.text()).trim() || "graph.json: " + r.status);
-    return r.json();
+fetchJSON("graph.json")
+  .then(g => {
+    // Only here, once per page load: after this the hidden set is the user's.
+    for (const nd of [...g.nodes, ...g.libs]) if (nd.hidden) hidden.add(nd.id);
+    document.getElementById("supportToggle").hidden = ![...g.nodes, ...g.libs].some(nd => nd.support);
+    fetchedGraph = g;
+    showView();
   })
-  .then(g => { currentGraph = g; render(g); })
   .catch(err => { document.getElementById("err").textContent = String(err); });
 </script>
 </body>

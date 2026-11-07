@@ -1,0 +1,75 @@
+# go-deps-view config: steers how this module's dependency graph is laid out and
+# annotated. It is YAML and every section is optional. The viewer reads it on each
+# request, so reload the page to see an edit.
+#
+# To fill it in, as an agent or by hand:
+#
+# 1. Run `go-deps-view -json` in this directory. `nodes[].id` lists the packages,
+#    `edges` the imports between them, and `libs[].id` the external libraries.
+# 2. Work out each package's role from its code and docs, not from its import depth.
+#    Import depth is what the graph already shows without a config.
+# 3. Write the sections below. Leave out any that wouldn't add something.
+# 4. Run `go-deps-view -json > /dev/null` again. It has to exit 0 and print no
+#    warnings: invalid YAML is an error, and an entry matching nothing is a
+#    warning. A misspelled key is silently ignored, so check the key names
+#    against the ones below.
+# 5. Replace this guide with a line saying what the file is, once it has done its job.
+#
+# Sections:
+#
+# layers    Named bands, top first. Put what a user or consumer starts from at the
+#           top and the foundation at the bottom, with examples and test helpers
+#           last. Aim for 3 to 5 layers.
+#   name          Label of the band.
+#   description   Short text under the name: what the layer is for.
+#   entrypoint    true gives the layer's packages the accent border programs have.
+#   packages      Required. Paths relative to this directory. A folder covers
+#                 everything inside it, "." is the root package, and "*" (the quotes
+#                 are required) is everything not listed. Prefer folders and include
+#                 a "*" layer, so that new packages land somewhere sensible.
+#                 Layers order items sharing a parent folder and never split a folder
+#                 box, so a nested path only moves it inside its folder's box.
+#
+# hidden    What starts toggled off: greyed out in place, with no arrows, until
+#           someone clicks it or "show all". Use it for noise worth keeping reachable,
+#           like generated code or mocks. Takes the same paths as `packages` (not
+#           "*"), plus library module paths. To drop packages from the graph
+#           altogether, use the -exclude flag instead.
+#
+# support   Code that only exists to support or verify the rest, like test helpers
+#           (a cachetest package checking implementations of an interface), fakes
+#           or examples, not part of the final implementation. The "support
+#           packages" checkbox removes them from the graph, with the libraries only
+#           they import, and lays out the rest without them. Takes the same paths
+#           as `hidden`. If a package is support code, list it here, not in hidden.
+#
+# A package's "i" button shows the README (README.md, README.markdown or README) in
+# its folder, rendered as markdown. To describe a package, write one there, saying
+# what it is for and what it must not do; it needs no entry in this file. The README
+# at the module root describes the project, so the root package never shows one.
+#
+# Example, to adapt and uncomment:
+# layers:
+#   - name: Entry point
+#     description: What the user runs
+#     entrypoint: true
+#     packages: [.]
+#
+#   - name: Application
+#     description: Wiring and transport, no business rules
+#     packages: [app]
+#
+#   - name: Domain
+#     packages: ["*"]
+#
+#   - name: Support
+#     description: Examples and test helpers
+#     packages: [examples, internal/testutil]
+#
+# hidden:
+#   - internal/mocks
+#   - github.com/stretchr/testify
+#
+# support:
+#   - internal/testutil
+#   - internal/cache/cachetest

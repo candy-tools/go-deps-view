@@ -22,8 +22,13 @@ matches your task:
 3. Serve a single, dependency-free HTML viewer (embedded in the binary) plus the
    graph JSON, which is rebuilt from the module on every request. All folder nesting
    and layering is derived by the viewer from the package paths, and an optional
-   `.go-deps-view.config` (YAML) in the scanned directory can define named top-to-bottom
-   layers and an info text per package or library.
+   `.go-deps-view.config` (YAML) in the scanned directory, bootstrapped by `-init`, can
+   define named top-to-bottom layers, what starts hidden, and which support code (test
+   helpers and the like) a checkbox can leave out. A package's README, if its folder
+   has one, is served rendered as HTML for the dialog behind its info button.
+4. On request, expand a package to show its exported symbols, with an arrow from each
+   importing package to the symbols it references. That data comes from type checking
+   the module, so it has its own endpoint, fetched the first time a package is expanded.
 
 ## Ground rules that follow
 
