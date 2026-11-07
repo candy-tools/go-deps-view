@@ -25,10 +25,3 @@ and `todo list --json` cover the common actions — run `todo --help`.
 -->
 
 # next changes
-
-- [x] make the differnt layers ( as added by the config ) better visible
-  make the split betere visible
-- [x] when hihlignt a librry use 2 differnt colors/tones for incoming and outgping depencendyes
-- [x] allo the config to have default hidden
-- [x] add a margin to the left for the groups to show
-- [x] add a cli command to bootstrap the config and some documentiton in the file to tell agents hw to populate the config
