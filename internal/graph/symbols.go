@@ -30,11 +30,22 @@ type SymbolUse struct {
 	Symbol string `json:"symbol"` // a Symbol name in To; a struct field counts as its type
 }
 
+// Implementation says a type declared in package From satisfies an interface of
+// package To. Go interfaces are satisfied implicitly, so unlike a SymbolUse it needs
+// no import: From may never mention To at all.
+type Implementation struct {
+	From      string `json:"from"`
+	Type      string `json:"type"` // the implementing type's name in From, exported or not
+	To        string `json:"to"`
+	Interface string `json:"interface"` // a Symbol name in To
+}
+
 // Symbols is the symbol-level detail on top of a Graph. It needs the module type
 // checked, which is too slow for every Graph, so it is built separately.
 type Symbols struct {
-	Packages []PackageSymbols `json:"packages"`
-	Uses     []SymbolUse      `json:"uses"`
+	Packages   []PackageSymbols `json:"packages"`
+	Uses       []SymbolUse      `json:"uses"`
+	Implements []Implementation `json:"implements"`
 }
 
 // symbolRef is what a types.Object resolves to in the output.
@@ -66,12 +77,15 @@ func BuildSymbols(dir string, exclude []string) (*Symbols, error) {
 	inModule := moduleMatcher(module, exclude)
 	s := &Symbols{Packages: []PackageSymbols{}, Uses: []SymbolUse{}}
 	refs := map[types.Object]symbolRef{}
+	var local []idPackage
 	for _, p := range pkgs {
 		if inModule(p.PkgPath) {
 			id := relID(module, p.PkgPath)
 			s.Packages = append(s.Packages, PackageSymbols{ID: id, Symbols: exportedSymbols(p.Types, id, refs)})
+			local = append(local, idPackage{id: id, pkg: p.Types})
 		}
 	}
+	s.Implements = implementations(local)
 	// Separate pass: a package can be listed before the packages it imports.
 	for _, p := range pkgs {
 		if inModule(p.PkgPath) {
@@ -198,6 +212,70 @@ func symbolUses(p *packages.Package, id string, refs map[types.Object]symbolRef)
 		uses = append(uses, u)
 	}
 	return uses
+}
+
+// idPackage is a type-checked in-module package with its graph node id.
+type idPackage struct {
+	id  string
+	pkg *types.Package
+}
+
+// implementations pairs every package-level type with the exported interfaces of the
+// other in-module packages that it, or a pointer to it, satisfies. Interfaces without
+// methods are left out, as everything satisfies them, and so are constraints and
+// generic types, which can't be checked without type arguments. A type implementing an
+// interface of its own package is no dependency, so it's left out too.
+func implementations(local []idPackage) []Implementation {
+	type named struct {
+		id   string
+		name string
+		typ  types.Type
+	}
+	var ifaces, concrete []named
+	for _, p := range local {
+		scope := p.pkg.Scope()
+		for _, name := range scope.Names() {
+			tn, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok || tn.IsAlias() {
+				continue
+			}
+			if n, ok := tn.Type().(*types.Named); !ok || n.TypeParams().Len() > 0 {
+				continue
+			}
+			iface, isIface := tn.Type().Underlying().(*types.Interface)
+			switch {
+			case !isIface:
+				concrete = append(concrete, named{p.id, name, tn.Type()})
+			case tn.Exported() && iface.NumMethods() > 0 && iface.IsMethodSet():
+				ifaces = append(ifaces, named{p.id, name, iface})
+			}
+		}
+	}
+
+	out := []Implementation{}
+	for _, c := range concrete {
+		ptr := types.NewPointer(c.typ)
+		for _, i := range ifaces {
+			iface := i.typ.(*types.Interface)
+			if c.id != i.id && (types.Implements(c.typ, iface) || types.Implements(ptr, iface)) {
+				out = append(out, Implementation{From: c.id, Type: c.name, To: i.id, Interface: i.name})
+			}
+		}
+	}
+	sort.Slice(out, func(a, b int) bool {
+		x, y := out[a], out[b]
+		if x.From != y.From {
+			return x.From < y.From
+		}
+		if x.To != y.To {
+			return x.To < y.To
+		}
+		if x.Interface != y.Interface {
+			return x.Interface < y.Interface
+		}
+		return x.Type < y.Type
+	})
+	return out
 }
 
 // originOf maps a method or field of an instantiated generic type back to the

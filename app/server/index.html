@@ -25,6 +25,8 @@
     --lib: #d8a657;
     --lib-line: #7a6a44;
     --pinned: #453714;
+    --impl: #c792ea;
+    --impl-bg: #2a2038;
   }
   * { box-sizing: border-box; }
   body {
@@ -74,7 +76,8 @@
   header .stats { color: var(--muted); font-size: 12px; }
   .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
   .legend i { width: 14px; height: 3px; border-radius: 2px; background: var(--line-hi); }
-  .legend i.in { margin-left: 6px; background: var(--line-in); }
+  .legend i.in, .legend i.impl { margin-left: 6px; background: var(--line-in); }
+  .legend i.impl { background: var(--impl); }
   /* The stable gutter keeps the libraries' column, sized from this width, from being
      pushed off the edge by the scrollbar that appears once the graph is drawn. */
   #wrap { width: 100%; height: calc(100vh - 49px); overflow: auto; scrollbar-gutter: stable; }
@@ -108,11 +111,13 @@
   .edge.hi { stroke: var(--line-hi); stroke-width: 2.4; }
   .edge.hi.in { stroke: var(--line-in); } /* points at the highlighted node: something importing it */
   .edge.dim { opacity: 0.1; }
+  /* From a package implementing the target's interfaces: violet, whether lit or not. */
+  .edge.impl, .edge.impl.hi, .edge.impl.hi.in { stroke: var(--impl); }
 
   /* Quiet by default: library arrows and imports already implied by a longer path
      only appear for the node being hovered or highlighted. */
   .edge.lib:not(.hi),
-  body:not(.show-implied) .edge.implied:not(.hi):not(.symbol) { opacity: 0; }
+  body:not(.show-implied) .edge.implied:not(.hi):not(.symbol):not(.impl) { opacity: 0; }
 
   .node > rect {
     fill: var(--node);
@@ -135,6 +140,7 @@
      to look different for the click to show. */
   .node.pinned > rect { fill: var(--pinned); stroke: var(--lib); stroke-width: 2.5; }
   .node.dim { opacity: 0.2; }
+  .node.impl-hi > rect { fill: var(--impl-bg); stroke: var(--impl); }
 
   /* Toggled-off nodes: greyed in place, with every edge touching them hidden. */
   .node.off { opacity: 0.5; }
@@ -175,6 +181,18 @@
   .sym-row rect { fill: transparent; transition: fill .12s; }
   .sym-row:hover rect, .sym-row.hi rect { fill: var(--node-border); }
   .node .sym-row:hover text, .node .sym-row.hi text { fill: var(--text); }
+  .node .sym-row text.impl-count { text-anchor: end; fill: var(--impl); font-size: 10px; font-family: system-ui, sans-serif; }
+
+  /* The card beside a hovered interface row: who uses it and who implements it. */
+  #symTip { position: fixed; z-index: 10; max-width: 380px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--node-border); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.45); font-size: 12px; pointer-events: none; }
+  #symTip[hidden] { display: none; }
+  #symTip .tip-head { font: 600 13px ui-monospace, monospace; overflow-wrap: anywhere; }
+  #symTip .tip-head span { font: 400 12px system-ui, sans-serif; color: var(--muted); margin-left: 6px; }
+  #symTip h3 { margin: 10px 0 3px; font-size: 12px; }
+  #symTip h3.uses { color: var(--line-in); }
+  #symTip h3.impl { color: var(--impl); }
+  #symTip div.line { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+  #symTip .muted { color: var(--muted); }
 
   /* The body scrolls, not the dialog: a click on the dialog itself closes it. */
   #info { width: min(720px, calc(100vw - 32px)); max-height: none; overflow: hidden; padding: 0; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
@@ -236,11 +254,12 @@
     <label class="toggle" id="supportToggle" hidden><input type="checkbox" id="showSupport" checked> support packages</label>
     <button type="button" class="btn" id="hideAll">hide all</button>
     <button type="button" class="btn" id="showAll" disabled>show all</button>
-    <span class="legend" title="Arrow colours on a highlighted node"><i></i>imports<i class="in"></i>imported by</span>
+    <span class="legend" title="Arrow colours on a highlighted node"><i></i>imports<i class="in"></i>imported by<i class="impl"></i>implements</span>
     <span class="stats" id="stats"></span>
   </header>
   <div id="err"></div>
   <div id="wrap"><svg id="svg"></svg></div>
+  <div id="symTip" hidden></div>
   <dialog id="info" aria-labelledby="infoTitle">
     <div class="info-body">
       <h2 id="infoTitle"></h2>
@@ -277,6 +296,7 @@ const nodeWidth = (label, buttonsW, min, pad = PAD_X) => Math.max(min, label.len
 const SYM_ROW_H = 20, SYM_PAD = 4, SYM_PAD_X = 10, SYM_INDENT = 14, SYM_MAX_W = 480;
 const SYM_CW = 6.6;             // approx monospace symbol width at 11px
 const NO_SYMBOLS = "no exported symbols";
+const IMPL_BADGE_W = 52;        // room at an interface row's right end for its "3 impl" count
 const LANE_NEAR = 22, LANE_STEP = 10, LANE_ROOM_MAX = 92, LANE_BEND = 6;
 // Importers sharing a row land side by side. Arrows sharing a gap or a package's lanes
 // turn at different heights: side by side at a shallow angle, they'd otherwise touch.
@@ -813,21 +833,85 @@ function loadSymbols() {
       (usedFrom.get(pair) || usedFrom.set(pair, []).get(pair)).push(u.symbol);
       (usedBy.get(symbol) || usedBy.set(symbol, new Set()).get(symbol)).add(u.from);
     }
-    symbols = { rows, usedFrom, usedBy };
+    // (from, to) -> interface names; (to, interface) -> implementing package -> type
+    // names; to -> implementing packages; (from, type) -> the interfaces it implements.
+    const implFrom = new Map(), implBy = new Map(), implementers = new Map(), implementsOf = new Map();
+    for (const i of s.implements || []) {
+      const pair = symbolKey(i.from, i.to), iface = symbolKey(i.to, i.interface), typ = symbolKey(i.from, i.type);
+      const names = implFrom.get(pair) || implFrom.set(pair, []).get(pair);
+      if (!names.includes(i.interface)) names.push(i.interface);
+      const byPkg = implBy.get(iface) || implBy.set(iface, new Map()).get(iface);
+      (byPkg.get(i.from) || byPkg.set(i.from, []).get(i.from)).push(i.type);
+      (implementers.get(i.to) || implementers.set(i.to, new Set()).get(i.to)).add(i.from);
+      (implementsOf.get(typ) || implementsOf.set(typ, []).get(typ)).push(i);
+    }
+    symbols = { rows, usedFrom, usedBy, implFrom, implBy, implementers, implementsOf };
   }).catch(err => { symbolsLoad = null; throw err; });
   return symbolsLoad;
 }
 
 const symbolIndent = s => s.name.includes(".") ? SYM_INDENT : 0; // a method sits under its type
+// The number of types implementing the interface `name` of package `id`.
+const implCount = (id, name) => [...(symbols.implBy.get(symbolKey(id, name))?.values() || [])].reduce((n, types) => n + types.length, 0);
+const badgeW = (id, s) => implCount(id, s.name) ? IMPL_BADGE_W : 0;
+// The packages implementing nd's interfaces that this view draws.
+const implementersShown = nd => [...(symbols.implementers.get(nd.id) || [])].filter(id => currentGraph.nodes.some(n => n.id === id));
+
+const nodeOf = id => fetchedGraph.nodes.find(n => n.id === id);
+const pkgLabel = id => id === "." ? fetchedGraph.module.split("/").pop() : id.replace(/^\.\//, "");
+
+// A type's tooltip line naming the interfaces of other packages it implements.
+function implementsNote(id, name) {
+  const of = symbols.implementsOf.get(symbolKey(id, name));
+  return of ? "\nimplements " + of.map(i => `${nodeOf(i.to)?.name || pkgLabel(i.to)}.${i.interface}`).join(", ") : "";
+}
+
+// The card beside a hovered interface row: its signature, the packages using it, and
+// the types implementing it, grouped by package. Built as text, never as markup.
+function showSymTip(rowEl, id, s, laneRoom) {
+  const tip = document.getElementById("symTip");
+  tip.replaceChildren();
+  const add = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    tip.appendChild(e);
+    return e;
+  };
+  const head = add("div", "tip-head", s.name);
+  const where = document.createElement("span");
+  where.textContent = "in " + pkgLabel(id);
+  head.appendChild(where);
+  add("div", "line muted", s.signature);
+  const users = [...(symbols.usedBy.get(symbolKey(id, s.name)) || [])].sort();
+  add("h3", "uses", "Used by");
+  add("div", "line" + (users.length ? "" : " muted"), users.length ? users.map(pkgLabel).join(" · ") : "no package in the module");
+  add("h3", "impl", "Implemented by");
+  const impls = [...(symbols.implBy.get(symbolKey(id, s.name)) || [])].sort(([p], [q]) => p.localeCompare(q));
+  for (const [pkg, types] of impls) {
+    const line = add("div", "line", pkgLabel(pkg) + ": " + types.join(", "));
+    if (!currentGraph.nodes.some(n => n.id === pkg)) line.append(" (not drawn)");
+    else if (hidden.has(pkg)) line.append(" (hidden)");
+  }
+  tip.hidden = false;
+  // Past the lanes, so it hides none of the arrows it describes.
+  const r = rowEl.getBoundingClientRect(), t = tip.getBoundingClientRect(), off = laneRoom + 12;
+  const right = r.right + off + t.width <= window.innerWidth;
+  tip.style.left = (right ? r.right + off : Math.max(8, r.left - off - t.width)) + "px";
+  tip.style.top = Math.max(8, Math.min(r.top - 8, window.innerHeight - t.height - 8)) + "px";
+}
+const hideSymTip = () => { document.getElementById("symTip").hidden = true; };
 
 // Long signatures are cut to keep the graph readable; the row's tooltip has the rest.
+// Each package arriving in a lane, to use symbols or implement interfaces, needs room.
 function sizeNode(nd) {
   if (!expanded.has(nd.id)) { nd._w = nd._collapsedW; nd._h = NODE_H; nd._laneRoom = 0; return; }
   const users = currentGraph.edges.filter(e => e.to === nd.id && symbols.usedFrom.has(symbolKey(e.from, e.to))).length;
-  nd._laneRoom = users ? Math.min(LANE_ROOM_MAX, LANE_NEAR + (users - 1) * LANE_STEP) : 0;
+  const trunks = users + implementersShown(nd).length;
+  nd._laneRoom = trunks ? Math.min(LANE_ROOM_MAX, LANE_NEAR + (trunks - 1) * LANE_STEP) : 0;
   const rows = symbols.rows.get(nd.id) || [];
   nd._h = NODE_H + SYM_PAD * 2 + Math.max(1, rows.length) * SYM_ROW_H;
-  const longest = Math.max(NO_SYMBOLS.length * SYM_CW, ...rows.map(s => s.signature.length * SYM_CW + symbolIndent(s)));
+  const longest = Math.max(NO_SYMBOLS.length * SYM_CW, ...rows.map(s => s.signature.length * SYM_CW + symbolIndent(s) + badgeW(nd.id, s)));
   nd._w = Math.max(nd._collapsedW, Math.min(SYM_MAX_W, longest + SYM_PAD_X * 2));
 }
 
@@ -926,6 +1010,7 @@ function updateHiddenControl() {
 }
 
 function render(g) {
+  hideSymTip(); // its row is about to be replaced
   const showLibs = document.getElementById("showLibs").checked;
   g.nodes = g.nodes || []; g.edges = g.edges || [];
   g.libs = g.libs || []; g.libEdges = g.libEdges || [];
@@ -1075,7 +1160,9 @@ function render(g) {
      <marker id="arrow-hi" markerWidth="10" markerHeight="10" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
        <path d="M0,0 L7.5,3.2 L0,6.4 Z" style="fill: var(--line-hi)"/></marker>
      <marker id="arrow-in" markerWidth="10" markerHeight="10" refX="7.5" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
-       <path d="M0,0 L7.5,3.2 L0,6.4 Z" style="fill: var(--line-in)"/></marker>`;
+       <path d="M0,0 L7.5,3.2 L0,6.4 Z" style="fill: var(--line-in)"/></marker>
+     <marker id="arrow-impl" markerWidth="12" markerHeight="12" refX="10" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+       <path d="M1,1 L10,5 L1,9 Z" style="fill: var(--bg); stroke: var(--impl); stroke-width: 1.4"/></marker>`;
   svg.appendChild(defs);
 
   // Bands and lines stay at the layer's home spot: they mark the configured layout,
@@ -1139,7 +1226,7 @@ function render(g) {
   }
 
   // Project edges, with the ones that carry structure drawn last, on top.
-  const drawn = g.edges
+  let drawn = g.edges
     .map(e => ({ e, a: byId.get(e.from), b: byId.get(e.to) }))
     .filter(x => x.a && x.b)
     .sort((p, q) => Number(q.e.implied) - Number(p.e.implied));
@@ -1147,22 +1234,55 @@ function render(g) {
   // like any import, and a branch from its end to each symbol it references. They show
   // even if the import is implied, or the package's list of users would have holes. An
   // import referencing nothing, such as a blank one, stays a plain arrow.
-  for (const x of drawn) {
-    const cross = topFolder(x.a.id) !== topFolder(x.b.id) ? "cross" : "";
-    const implied = x.e.implied ? "implied" : "";
-    const names = expanded.has(x.b.id) ? symbols.usedFrom.get(symbolKey(x.e.from, x.e.to)) || [] : [];
-    x.path = addEdgePath(x.e, `${cross} ${implied} ${names.length ? "symbol" : ""}`);
-    x.branches = [];
-    if (!names.length) continue;
+  // A package implementing an expanded package's interfaces gets a trunk of its own
+  // for them, violet with hollow heads, on the package's right, whether it imports the
+  // package or not: a type needn't, to satisfy an interface. A collapsed package's
+  // import arrow from an implementer turns violet instead, once the symbols are loaded.
+  const branchTo = (x, names, cls) => {
     x.path.removeAttribute("marker-end");
     x.path._symbols = new Set(names);
     const rows = symbols.rows.get(x.b.id);
     x.branches = names.map(name => {
-      const path = addEdgePath(x.e, `${cross} ${implied} symbol`);
+      const path = addEdgePath(x.e, `${cls} symbol`);
       path._symbols = new Set([name]);
+      if (x.impl) { path._impl = true; path.setAttribute("marker-end", "url(#arrow-impl)"); }
       return { path, row: rows.findIndex(s => s.name === name) };
     });
+  };
+  const implTrunks = [];
+  const addImplTrunk = (e, a, b, cross) => {
+    const x = { e, a, b, impl: true, path: addEdgePath(e, `${cross} impl symbol`) };
+    x.path._impl = true;
+    branchTo(x, symbols.implFrom.get(symbolKey(a.id, b.id)), `${cross} impl`);
+    implTrunks.push(x);
+  };
+  for (const x of drawn) {
+    const cross = topFolder(x.a.id) !== topFolder(x.b.id) ? "cross" : "";
+    const implied = x.e.implied ? "implied" : "";
+    const open = expanded.has(x.b.id);
+    const names = open ? symbols.usedFrom.get(symbolKey(x.e.from, x.e.to)) || [] : [];
+    const implementing = !!symbols?.implFrom.has(symbolKey(x.e.from, x.e.to));
+    if (implementing && open) addImplTrunk(x.e, x.a, x.b, cross);
+    // An import that is there only for the interfaces, such as a `var _ I = T{}` check,
+    // is fully told by the violet trunk.
+    if (implementing && open && !names.length) { x.drop = true; continue; }
+    const violet = implementing && !open;
+    x.path = addEdgePath(x.e, `${cross} ${implied} ${names.length ? "symbol" : ""} ${violet ? "impl" : ""}`);
+    x.branches = [];
+    if (violet) { x.path._impl = true; x.path.setAttribute("marker-end", "url(#arrow-impl)"); }
+    if (names.length) branchTo(x, names, `${cross} ${implied}`);
   }
+  // Implementers that don't import the package they implement.
+  const imports = new Set(g.edges.map(e => symbolKey(e.from, e.to)));
+  for (const b of g.nodes) {
+    if (!expanded.has(b.id)) continue;
+    for (const from of symbols.implementers.get(b.id) || []) {
+      const a = byId.get(from);
+      if (!a || imports.has(symbolKey(from, b.id))) continue;
+      addImplTrunk({ from, to: b.id, synthetic: true }, a, b, topFolder(from) !== topFolder(b.id) ? "cross" : "");
+    }
+  }
+  drawn = drawn.filter(x => !x.drop).concat(implTrunks);
 
   // Routing works from wherever the nodes are now, so it holds up under dragging.
   // A band is a run of nodes overlapping vertically (a row, unless something was
@@ -1198,11 +1318,15 @@ function render(g) {
 
   // Picks a gap in every band an arrow must cross: a small shortest-path search
   // that prefers staying straight and staying out of folders it has no part in.
+  // Distance is measured as the crow flies: counting only sideways travel would tie
+  // every route that heads steadily toward the target, and the tie would go to the
+  // gap's edge nearest the start, leaving the arrow a sharp late turn.
   function chooseWay(x, bands) {
     const { upper, lower, e } = x;
     const aim = nd => x.side && nd === x.b ? laneX(nd, x.side, nd._laneRoom) : centerX(nd);
     const x1 = aim(upper), y1 = upper._y + upper._h, x2 = aim(lower), y2 = lower._y;
-    let layer = [{ x: x1, cost: 0, prev: null }];
+    const step = (p, cx, cy) => p.cost + Math.hypot(cx - p.x, cy - p.y);
+    let layer = [{ x: x1, y: y1, cost: 0, prev: null }];
     for (const band of bands) {
       if (band.top < y1 || band.bottom > y2) continue;
       const midY = (band.top + band.bottom) / 2;
@@ -1214,14 +1338,14 @@ function render(g) {
           let penalty = 0;
           for (const fb of folderBoxes) if (unrelated(fb, e) && inBox(cx, midY, fb)) penalty += BOX_PENALTY;
           let prev = layer[0];
-          for (const p of layer) if (p.cost + Math.abs(cx - p.x) < prev.cost + Math.abs(cx - prev.x)) prev = p;
-          next.push({ x: cx, cost: prev.cost + Math.abs(cx - prev.x) + penalty, prev, band, gap });
+          for (const p of layer) if (step(p, cx, midY) < step(prev, cx, midY)) prev = p;
+          next.push({ x: cx, y: midY, cost: step(prev, cx, midY) + penalty, prev, band, gap });
         }
       });
       layer = next;
     }
     let tail = layer[0];
-    for (const p of layer) if (p.cost + Math.abs(x2 - p.x) < tail.cost + Math.abs(x2 - tail.x)) tail = p;
+    for (const p of layer) if (step(p, x2, y2) < step(tail, x2, y2)) tail = p;
     const way = [];
     for (let p = tail; p.prev; p = p.prev) way.unshift({ x: p.x, band: p.band, gap: p.gap, order: (x1 + x2) / 2 });
     return way;
@@ -1261,7 +1385,7 @@ function render(g) {
     for (const x of drawn) {
       x.up = x.a._y > x.b._y + x.b._h;
       [x.upper, x.lower] = x.up ? [x.b, x.a] : [x.a, x.b];
-      x.side = !x.branches.length ? 0 : centerX(x.a) <= centerX(x.b) ? -1 : 1;
+      x.side = !x.branches.length ? 0 : x.impl ? 1 : centerX(x.a) <= centerX(x.b) ? -1 : 1;
       x.way = x.lower._y > x.upper._y + x.upper._h ? chooseWay(x, bands) : [];
       for (const w of x.way) {
         const k = bands.indexOf(w.band) + ":" + w.gap;
@@ -1273,13 +1397,31 @@ function render(g) {
       group.sort((p, q) => p.x - q.x || p.order - q.order);
       const room = isFinite(lo) && isFinite(hi) ? hi - lo : Infinity;
       const step = group.length > 1 ? Math.min(CHANNEL, room / group.length) : CHANNEL;
-      const span = step * (group.length - 1);
-      const mean = group.reduce((s, w) => s + w.x, 0) / group.length;
-      const start = clamp(mean - span / 2, lo, hi - span);
-      group.forEach((w, i) => {
-        w.x = start + i * step;
-        w.rank = i - (group.length - 1) / 2;
-      });
+      // Only arrows that would overlap bunch up, each bundle centred where its arrows
+      // meant to pass; an arrow crossing the gap far from the others keeps its line
+      // rather than being dragged over to them and left a sharp turn to make up.
+      const bundles = [];
+      const startOf = b => b.sum / b.ws.length - step * (b.ws.length - 1) / 2;
+      for (const w of group) {
+        let b = { ws: [w], sum: w.x };
+        bundles.push(b);
+        for (let prev; (prev = bundles[bundles.length - 2]) && startOf(prev) + step * prev.ws.length > startOf(b); b = prev) {
+          prev.ws.push(...b.ws);
+          prev.sum += b.sum;
+          bundles.pop();
+        }
+      }
+      for (const b of bundles) {
+        const start = startOf(b);
+        b.ws.forEach((w, k) => {
+          w.x = start + k * step;
+          w.rank = k - (b.ws.length - 1) / 2;
+        });
+      }
+      // Then everything is kept inside the gap, still a step apart.
+      const last = group.length - 1;
+      group.forEach((w, k) => { w.x = Math.max(w.x, lo + k * step); });
+      group.forEach((w, k) => { w.x = Math.min(w.x, hi - (last - k) * step); });
     }
     const port = (nd, i, n) => nd._x + nd._w * (0.5 + PORT_INSET * ((i + 1) / (n + 1) - 0.5));
     const outgoing = new Map(), incoming = new Map(), beside = new Map();
@@ -1438,17 +1580,26 @@ function render(g) {
     }
     rows.forEach((s, i) => {
       const rowEl = el("g", { class: "sym-row" });
-      const y = NODE_H + SYM_PAD + i * SYM_ROW_H, indent = symbolIndent(s);
+      const y = NODE_H + SYM_PAD + i * SYM_ROW_H, indent = symbolIndent(s), badge = badgeW(nd.id, s);
       rowEl.appendChild(el("rect", { x: 1, y, width: nd._w - 2, height: SYM_ROW_H }));
       const text = el("text", { x: SYM_PAD_X + indent, y: y + SYM_ROW_H / 2 });
-      const room = Math.floor((nd._w - SYM_PAD_X * 2 - indent) / SYM_CW);
+      const room = Math.floor((nd._w - SYM_PAD_X * 2 - indent - badge) / SYM_CW);
       text.textContent = s.signature.length > room ? s.signature.slice(0, room - 1) + "…" : s.signature;
       rowEl.appendChild(text);
-      const title = el("title"); title.textContent = s.signature; rowEl.appendChild(title);
-      rowEl.addEventListener("mouseenter", () => highlightSymbol(nd.id, s.name));
-      rowEl.addEventListener("mouseleave", () => highlight(nd.id));
+      if (badge) {
+        const count = el("text", { class: "impl-count", x: nd._w - SYM_PAD_X, y: y + SYM_ROW_H / 2 });
+        count.textContent = implCount(nd.id, s.name) + " impl";
+        rowEl.appendChild(count);
+      } else {
+        // An interface row with implementers has the card instead of a tooltip.
+        const title = el("title"); title.textContent = s.signature + implementsNote(nd.id, s.name); rowEl.appendChild(title);
+      }
+      rowEl.addEventListener("mouseenter", () => { highlightSymbol(nd.id, s.name); if (badge) showSymTip(rowEl, nd.id, s, nd._laneRoom); });
+      rowEl.addEventListener("mouseleave", () => { hideSymTip(); highlight(nd.id); });
       gEl.appendChild(rowEl);
-      symbolRowEls.push({ rowEl, users: symbols.usedBy.get(symbolKey(nd.id, s.name)) || new Set() });
+      // A row lights up for a lit package using it or, for an interface, implementing it.
+      const users = new Set([...(symbols.usedBy.get(symbolKey(nd.id, s.name)) || []), ...(symbols.implBy.get(symbolKey(nd.id, s.name))?.keys() || [])]);
+      symbolRowEls.push({ rowEl, users });
     });
   }
   const addNode = (id, label, cls, titleText) => {
@@ -1554,6 +1705,7 @@ function render(g) {
   const add = (k, v) => (neighbors.get(k) || neighbors.set(k, new Set()).get(k)).add(v);
   for (const e of g.edges) { add(e.from, e.to); add(e.to, e.from); }
   if (libsShown) for (const e of g.libEdges) { add(e.from, e.to); add(e.to, e.from); }
+  for (const x of implTrunks) if (x.e.synthetic) { add(x.a.id, x.b.id); add(x.b.id, x.a.id); }
 
   // A toggled-off node is greyed in place and every edge touching it is hidden.
   const edgeOff = p => hidden.has(p._from) || hidden.has(p._to);
@@ -1601,6 +1753,7 @@ function render(g) {
       const off = hidden.has(nid);
       el.classList.toggle("dim", !off && lit.size > 0 && !keep.has(nid));
       el.classList.toggle("hi", !off && lit.has(nid));
+      el.classList.remove("impl-hi");
     });
     for (const p of edgeEls) {
       const leaving = lit.has(p._from);
@@ -1614,17 +1767,21 @@ function render(g) {
     p.classList.toggle("hi", on);
     p.classList.toggle("in", on && !leaving);
     p.classList.toggle("dim", !edgeOff(p) && dim);
+    if (p._impl) return; // an implementer's arrows keep their violet hollow heads
     if (p.hasAttribute("marker-end")) p.setAttribute("marker-end", !on ? "url(#arrow)" : leaving ? "url(#arrow-hi)" : "url(#arrow-in)");
   }
   // A hovered row narrows the package's highlight down to that symbol: its arrows and
-  // the packages they come from. Everything else dims, including highlighted nodes.
+  // the packages they come from, users and, for an interface, implementers in violet.
+  // Everything else dims, including highlighted nodes.
   function highlightSymbol(id, name) {
     if (hidden.has(id)) return;
     const users = symbols.usedBy.get(symbolKey(id, name)) || new Set();
+    const impls = symbols.implBy.get(symbolKey(id, name)) || new Map();
     nodeEls.forEach((el, nid) => {
       const off = hidden.has(nid);
-      el.classList.toggle("dim", !off && nid !== id && !users.has(nid));
+      el.classList.toggle("dim", !off && nid !== id && !users.has(nid) && !impls.has(nid));
       el.classList.toggle("hi", !off && nid === id);
+      el.classList.toggle("impl-hi", !off && impls.has(nid));
     });
     for (const p of edgeEls) {
       const on = !edgeOff(p) && p._to === id && !!p._symbols?.has(name);
@@ -1668,6 +1825,9 @@ fetchJSON("graph.json")
     document.getElementById("supportToggle").hidden = ![...g.nodes, ...g.libs].some(nd => nd.support);
     fetchedGraph = g;
     showView();
+    // The symbols come right after, as type checking is slow: then the arrows from
+    // implementers turn violet. A failure stays quiet; the loupe retries and reports it.
+    loadSymbols().then(() => render(currentGraph), () => {});
   })
   .catch(err => { document.getElementById("err").textContent = String(err); });
 </script>
