@@ -106,6 +106,7 @@ app/cmd            ← flag parsing, -json / -init / -version, dispatch
 |---|---|
 | `packages` | every in-module package: `id` (the node id) and `symbols`, each with a `name` (`Build`, or `Graph.Sorted` for a method) and a display `signature` |
 | `uses` | `from` references `symbol` in `to` |
+| `implements` | `type` in `from` (or a pointer to it) satisfies the interface `interface` in `to` |
 
 - **A use refines an import edge.** It only counts if `from` imports `to` directly, so
   each one has a matching `edges` entry. Calling a method on a value obtained from a third
@@ -115,6 +116,14 @@ app/cmd            ← flag parsing, -json / -init / -version, dispatch
   syntax, so a method call on a value counts. A struct field counts as its type, a method
   of an instantiated generic as the generic's, and an interface's method as the interface
   declaring it, which may be an embedded one. Test files aren't loaded, as in `Build`.
+- **An implementation needs no import.** Go interfaces are satisfied implicitly, so
+  `implementations` checks every package-level type against every exported interface
+  of the other in-module packages with `types.Implements`, on the type and its
+  pointer. That is what lets the viewer tell a consumer of an interface from a
+  provider, when both import the package the same way. Unexported implementers count.
+  Interfaces without methods (everything satisfies them), constraints, and generic
+  types and interfaces (they can't be checked without type arguments) are left out,
+  and so is a type implementing an interface of its own package.
 - **Not listed:** exported methods of unexported types, and libraries' symbols.
 - **Type errors don't fail the build,** because `Build` succeeds on such a module too: the
   errors go to stderr and the resolved part is returned. A directory with no packages fails.
@@ -167,16 +176,20 @@ else is optimised around them.
 6. **Columns:** siblings need separating only if their row ranges overlap. Compact
    against those constraints, then pull each item toward its neighbours' median.
 7. **Routing (`routeEdges`):** works from current positions, so it also runs during
-   drags. Arrows pick a gap in each band they cross, avoiding unrelated folders, then
-   drop any waypoint a clear curve can skip. Hidden arrows are routed too, so revealing
+   drags. Arrows pick a gap in each band they cross, avoiding unrelated folders and
+   scoring routes by straight-line length (sideways travel alone ties every route that
+   heads steadily toward the target), then drop any waypoint a clear curve can skip.
+   Arrows sharing a gap bunch together only when they would overlap; one passing far
+   from the rest keeps its line. Hidden arrows are routed too, so revealing
    them moves nothing. Routes always run from the upper package to the lower one, and
    the path is reversed for an import pointing up (from a layer or a drag), so its
    arrowhead lands on the bottom of the imported package.
 8. **Highlighting (`highlight`):** a lit node's arrows are coloured by direction, for
    packages and libraries alike: blue when leaving it, coral (`.edge.hi.in`) when reaching
    it. An arrow between two lit nodes counts as leaving.
-9. **Expanding (`toggleExpanded`, `layout.reflow`):** a package's loupe fetches
-   `/symbols.json` once per page load, then grows the node to hold a row per symbol.
+9. **Expanding (`toggleExpanded`, `layout.reflow`):** a package's loupe waits for
+   `/symbols.json`, fetched once per page load (in the background, or by the loupe after
+   a failed fetch), then grows the node to hold a row per symbol.
    `reflow` re-derives the home spots from the new sizes without repeating the ordering
    search: a row becomes as tall as its tallest package, and the columns are re-relaxed.
    So nothing changes rows or order, and collapsing restores the exact earlier layout.
@@ -195,3 +208,18 @@ else is optimised around them.
     no symbol, such as a blank one, stays a plain arrow. Only the arrows into a package
     split: the ones leaving an expanded package still start at its edge, because a use is
     per package, not per function.
+11. **Implementer arrows:** a package implementing an expanded package's interfaces gets
+    a second trunk (`addImplTrunk`), violet (`--impl`) with hollow heads (`arrow-impl`), always on
+    the package's right (`x.side = 1`), with a branch per implemented interface. It
+    needs no import: an implementer that doesn't import the package gets a `synthetic`
+    edge, drawn only while the package is expanded and counted as a neighbour for
+    highlighting. An import there only for the interfaces (a `var _ I = T{}` check)
+    is dropped as a plain arrow, since the trunk tells it. `sizeNode` counts these
+    trunks for the lane room, and an interface row reserves `IMPL_BADGE_W` for its
+    count. Hovering that row lights its implementers (`.impl-hi`) and opens `#symTip`,
+    a card built with `textContent`, placed past the lanes. An import arrow from an
+    implementer into a collapsed package is violet too. That needs the symbols before
+    any expand, so the page fetches them in the background right after drawing the graph
+    and re-renders when they arrive. A failed fetch stays quiet there; the loupe retries
+    and reports it.
+    `paintEdge` leaves an implementer's marker alone, so it stays hollow when lit.

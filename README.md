@@ -165,14 +165,25 @@ packages from the graph altogether, use `-exclude` instead.
 - **Loupe** — the magnifying glass on a package expands it to list its exported
   symbols, and imports of it split into one arrow per symbol the importer references.
   Hover a symbol to see only who references it, or hover a package to see which symbols
-  it references. The other packages move aside but keep their order. The first expand
-  type checks the module, so it can take a moment; the result lasts until you reload.
+  it references. The other packages move aside but keep their order. The symbols come
+  from type checking the module, which starts in the background once the graph shows,
+  so an expand right after loading can take a moment. The result lasts until you reload.
   - A long signature is cut off; its tooltip has the rest.
   - Arrows to an expanded package show even if the import is transitive, and stay dashed.
   - A blank import references no symbol, so it stays a single arrow to the package.
   - Only references from packages that import the symbol's package directly count. A
     symbol with no arrows may still be reached through a value from another package, or
     from tests, so it isn't necessarily unused.
+- **Interfaces** — Go types satisfy interfaces implicitly, so an import arrow can't say
+  whether a package consumes an interface or provides an implementation. The loupe's
+  data says it: a package implementing an expanded package's interfaces gets violet
+  arrows with hollow heads, arriving on the package's right side, one per interface
+  it implements. That holds even when the implementer never imports the package. An
+  interface row shows how many types implement it, and hovering it lights up its
+  users and, in violet, its implementers, beside a card listing both. An import arrow
+  from an implementer to a collapsed package is violet too, a moment after the graph
+  shows, once the type check is done.
+  - Interfaces without methods, constraints and generic types are left out.
 - Hover a node to highlight its neighbours and the edges touching it. Arrows to what
   it imports turn blue and arrows from whatever imports it turn coral, as the key in
   the header shows. A library is only ever imported, so its arrows are all coral.
@@ -225,7 +236,8 @@ While the server runs, `/symbols.json` serves the data behind the loupe:
       { "name": "Store.Get",  "signature": "func (*Store).Get(id string) (model.Item, error)" }
     ] }
   ],
-  "uses": [{ "from": "./server", "to": "./store", "symbol": "Store.Get" }]
+  "uses": [{ "from": "./server", "to": "./store", "symbol": "Store.Get" }],
+  "implements": [{ "from": "./store/pg", "type": "Store", "to": "./store", "interface": "Backend" }]
 }
 ```
 

@@ -27,8 +27,10 @@ matches your task:
    helpers and the like) a checkbox can leave out. A package's README, if its folder
    has one, is served rendered as HTML for the dialog behind its info button.
 4. On request, expand a package to show its exported symbols, with an arrow from each
-   importing package to the symbols it references. That data comes from type checking
-   the module, so it has its own endpoint, fetched the first time a package is expanded.
+   importing package to the symbols it references, and a violet arrow from each package
+   whose types implement its interfaces, whether or not that package imports it. That
+   data comes from type checking the module, so it has its own endpoint, fetched in the
+   background once the graph is drawn.
 
 ## Ground rules that follow
 

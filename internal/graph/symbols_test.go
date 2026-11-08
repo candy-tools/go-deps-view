@@ -208,6 +208,86 @@ func Oops() int {
 	}
 }
 
+// prod never imports iface, yet implements its interfaces: satisfaction is implicit.
+func TestBuildSymbolsImplements(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "go.mod"), "module example.com/impl\n\ngo 1.25\n")
+	write(t, filepath.Join(dir, "iface", "iface.go"), `package iface
+
+type Reader interface{ Read() string }
+
+type Writer interface{ Write(s string) }
+
+type ReadWriter interface {
+	Reader
+	Writer
+}
+
+type Empty interface{}
+
+type Number interface{ ~int | ~float64 }
+
+type Getter[T any] interface{ Get() T }
+
+type hidden interface{ Read() string }
+
+type Local struct{}
+
+func (Local) Read() string { return "" }
+`)
+	write(t, filepath.Join(dir, "prod", "prod.go"), `package prod
+
+type File struct{}
+
+func (File) Read() string { return "" }
+
+type writer struct{}
+
+func (*writer) Write(string) {}
+
+type Both struct{}
+
+func (*Both) Read() string { return "" }
+func (*Both) Write(string)  {}
+
+type Box[T any] struct{}
+
+func (Box[T]) Read() string { return "" }
+
+type Mode int
+`)
+	s, err := BuildSymbols(dir, nil)
+	if err != nil {
+		t.Fatalf("BuildSymbols: %v", err)
+	}
+	// Pointer receivers count, unexported implementers count, an embedded interface's
+	// methods count. Empty, constraint, generic and unexported interfaces don't, nor
+	// do generic types or a type implementing its own package's interface.
+	want := []Implementation{
+		{From: "./prod", Type: "Both", To: "./iface", Interface: "ReadWriter"},
+		{From: "./prod", Type: "Both", To: "./iface", Interface: "Reader"},
+		{From: "./prod", Type: "File", To: "./iface", Interface: "Reader"},
+		{From: "./prod", Type: "Both", To: "./iface", Interface: "Writer"},
+		{From: "./prod", Type: "writer", To: "./iface", Interface: "Writer"},
+	}
+	if !reflect.DeepEqual(s.Implements, want) {
+		t.Errorf("implements:\n got %+v\nwant %+v", s.Implements, want)
+	}
+	if len(s.Uses) != 0 {
+		t.Errorf("uses = %+v, want none", s.Uses)
+	}
+}
+
+func TestBuildSymbolsImplementsEmptyIsNonNil(t *testing.T) {
+	s, err := BuildSymbols(writeMinimalModule(t), nil)
+	if err != nil {
+		t.Fatalf("BuildSymbols: %v", err)
+	}
+	if s.Implements == nil {
+		t.Fatal("implements must be non-nil")
+	}
+}
+
 func TestBuildSymbolsBadDir(t *testing.T) {
 	if _, err := BuildSymbols(t.TempDir(), nil); err == nil {
 		t.Fatal("expected an error for a non-module directory")
