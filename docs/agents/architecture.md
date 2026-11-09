@@ -170,13 +170,17 @@ else is optimised around them.
    stop at the gutter. The gutter only exists when layers are configured. A band's
    hide/show button toggles its layer's packages by the closest-path lookup, not by what
    sits in the band, so a nested package follows the layer it is listed under. Libraries
-   belong to no layer, so with layers a vertical line (`libCutX`) ends the bands and the
-   libraries get a column past it, as narrow as its longest label allows. It sits at the
+   belong to no layer, so a vertical line (`libCutX`) ends the graph (and its bands, with
+   layers) and the libraries get a column past it, as narrow as its longest label allows,
+   with or without a config. Libraries stack in one block per owner (`libGroup`: the
+   account on a code host in `CODE_HOSTS`, otherwise the domain), each block level with
+   the mean height of its importers, with a line (`libSeps`) between blocks that, like
+   the bands, ignores drags. The column sits at the
    window's right edge, or just past the graph if that's wider, so it is the one part of
    the render that depends on the window: a resize re-renders, and `#wrap` reserves its
    scrollbar's width so the size is known before the graph is drawn. Like the bands it
    ignores drags, so a dragged package can cross it. It goes away with the libraries
-   checkbox, and without layers the libraries keep their box.
+   checkbox.
 3. **Folder cycles:** Go forbids package cycles but not folders importing each other.
    Such items (a strongly connected component) can't stack, so they share a band, side
    by side, with their packages interleaved by the package-level imports.
