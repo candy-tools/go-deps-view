@@ -21,7 +21,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          # Build releases with a recent Go, not the go.mod floor: the type checker
+          # (go/types) is compiled into the binary and rejects modules that need a
+          # newer Go than the one it was built with. Bump this with each Go release.
+          go-version: '1.27'
+          check-latest: true
           cache: true
 
       - name: Run GoReleaser

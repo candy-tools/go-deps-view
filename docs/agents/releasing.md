@@ -26,6 +26,10 @@ history (the changelog needs it) and runs `goreleaser release --clean`.
 - **`.deb`** (linux only) with a lintian override for the statically-linked binary. The
   Go toolchain is a runtime requirement (the tool shells out to `go list`) but is **not**
   declared as a hard package dependency — the audience already has Go installed.
+- **Release Go version:** `release.yml` pins a recent Go (currently `1.27`, latest
+  patch), not the `go.mod` floor; bump it when a new Go minor ships. The `go/types` type checker behind symbol expansion is compiled into
+  the binary and refuses modules that require a newer Go than the build toolchain
+  ("package requires newer Go version"), so an old build breaks on new modules.
 - **Homebrew cask** published into the **candy-tools/homebrew-tap** repo at
   `Casks/go-deps-view.rb`. Pushing to that separate repo needs a cross-repo PAT
   (`HOMEBREW_TAP_GITHUB_TOKEN`); the default `GITHUB_TOKEN` only reaches this repo. The
