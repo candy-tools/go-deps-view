@@ -35,10 +35,13 @@ target module on each request, so the Go toolchain must be on `PATH`.
   to see them all, drawn dashed.
 - **Libraries** — external dependency modules imported directly by the project
   sit on the right, toggled by the **external libraries** checkbox (standard-library
-  imports are always excluded). With a [layers config](config.md) a vertical line
-  cuts them off from the bands into a column at the window's right edge, only as wide
-  as they need, since they belong to no layer; without one they sit in a box. Each sits
-  level with the packages importing it, and its arrows appear on hover.
+  imports are always excluded). A vertical line cuts them off from the graph into a
+  column at the window's right edge, only as wide as they need; with a
+  [layers config](config.md) it also ends the bands, since libraries belong to no
+  layer. Libraries of the same owner (the account on GitHub, GitLab, Bitbucket or
+  Codeberg, otherwise the domain) are stacked together, with a line between one owner
+  and the next; each owner's block sits level with the packages importing it, and its
+  arrows appear on hover.
 - **Support packages** — with a [`support` config](config.md#support-packages), the
   **support packages** checkbox shows or removes the packages and libraries flagged there.
 - **Click to cycle** — clicking a package or library rotates it through highlighted

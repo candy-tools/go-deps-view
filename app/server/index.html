@@ -240,6 +240,7 @@
   .layer-toggle:hover text, .layer-toggle:focus-visible text, .layer-toggle.off text { fill: var(--text); }
   .layer-toggle.off rect { stroke: var(--lib); }
   .lib-column { fill-opacity: 0.05; pointer-events: none; }
+  .lib-sep { stroke: var(--layer-line); stroke-width: 1; pointer-events: none; }
 
   #err { padding: 24px; color: #ff8f8f; font-family: ui-monospace, monospace; white-space: pre-wrap; }
   #err:empty { display: none; }
@@ -305,10 +306,20 @@ const ROW_FAN = 7, ROW_FAN_MAX = 16, BEND_STAGGER = 12, BEND_STAGGER_ROOM = 0.6;
 // horizontal detour (px) worth taking to stay out of an unrelated folder.
 const GAP_MARGIN = 7, CHANNEL = 7, BOX_PENALTY = 220;
 const CURVE_STEP = 12;          // px between the samples that check a curve is clear
-// Libraries (external deps) on the right, in a box or, with layers, a column as narrow
-// as they allow: LIB_COL_PAD is its padding and that of the nodes inside it.
-const LIB_GAP = 90, LIB_PAD = 16, LIB_COL_PAD = 8, LIB_HEAD = 36, LIB_VGAP = 12, LIB_COLOR = "#d8a657";
+// Libraries (external deps) on the right, in a column as narrow as they allow:
+// LIB_COL_PAD is its padding and that of the nodes inside it. LIB_GROUP_GAP separates
+// the blocks of different owners, with room for the line between them.
+const LIB_GAP = 90, LIB_COL_PAD = 8, LIB_HEAD = 36, LIB_VGAP = 12, LIB_GROUP_GAP = 28, LIB_COLOR = "#d8a657";
 const LIB_HEADING = "libraries";
+
+// The owner a library is grouped under in the column: on a code-hosting site, the
+// account (github.com/go-gl for both github.com/go-gl/gl and github.com/go-gl/glfw/v3.3/glfw);
+// anywhere else the domain, which then belongs to one project (gorm.io, golang.org).
+const CODE_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org", "codeberg.org"]);
+function libGroup(modulePath) {
+  const parts = modulePath.split("/");
+  return parts.slice(0, CODE_HOSTS.has(parts[0]) ? 2 : 1).join("/");
+}
 // Dragging: pixels of movement before a press counts as a drag rather than a
 // click, and how close to the canvas's top/left edge anything may be dropped.
 const DRAG_MIN = 4, EDGE_MIN = 6;
@@ -742,7 +753,7 @@ function layoutPackages(g) {
     });
     return total;
   }
-  // Packages importing libraries lean right, toward the libraries box.
+  // Packages importing libraries lean right, toward the libraries' column.
   const libUses = new Map();
   for (const e of g.libEdges) libUses.set(e.from, (libUses.get(e.from) || 0) + 1);
   const barycentre = it => {
@@ -1102,46 +1113,55 @@ function render(g) {
   })(layout.root, null, null);
   const folderBoxes = [...boxes];
 
-  // Libraries on the right (optional). They aren't layered, so with layers a vertical
-  // line cuts them off from the bands into a column of their own, only as wide as they
-  // need and at the window's right edge, so the bands get the rest. Without layers there
-  // is no grid to cut and they sit in a box. Each lib sits level with the mean height
-  // of the packages importing it, pushed down only as far as needed to not overlap.
+  // Libraries on the right (optional). They aren't layered, so a vertical line cuts
+  // them off from the graph (and its bands, if any) into a column of their own, only as
+  // wide as they need and at the window's right edge, so the graph gets the rest. Libs
+  // of the same owner (libGroup) stack together as one block, level with the mean height
+  // of the packages importing any of them and pushed down only as far as needed to not
+  // overlap, with a line (libSeps) halfway between one block and the next.
   const libById = new Map(g.libs.map(l => [l.id, l]));
   const libsShown = showLibs && g.libs.length > 0;
   let libCutX = null;
+  const libSeps = [];
   if (libsShown) {
     for (const l of g.libs) {
-      l._w = layout.gutter ? nodeWidth(l.label, 0, LIB_HEADING.length * LABEL_CW, LIB_COL_PAD) : nodeWidth(l.label, 0, 90);
+      l._w = nodeWidth(l.label, 0, LIB_HEADING.length * LABEL_CW, LIB_COL_PAD);
       l._h = NODE_H;
     }
     const libW = Math.max(...g.libs.map(l => l._w));
-    if (layout.gutter) {
-      const windowW = document.getElementById("wrap").clientWidth;
-      libCutX = Math.max(layout.right + GAP_ROOT, windowW - libW - LIB_COL_PAD * 2);
-    }
-    const libX = libCutX === null ? layout.right + LIB_GAP + LIB_PAD : libCutX + LIB_COL_PAD;
+    const windowW = document.getElementById("wrap").clientWidth;
+    libCutX = Math.max(layout.right + GAP_ROOT, windowW - libW - LIB_COL_PAD * 2);
+    const libX = libCutX + LIB_COL_PAD;
     const ys = new Map(g.libs.map(l => [l.id, []]));
     for (const e of g.libEdges) {
       const a = byId.get(e.from);
       if (a && ys.has(e.to)) ys.get(e.to).push(a._y);
     }
-    const meanY = id => { const a = ys.get(id); return a.length ? a.reduce((s, v) => s + v, 0) / a.length : Infinity; };
-    let floor = MARGIN_TOP + LIB_HEAD;
-    for (const l of [...g.libs].sort((p, q) => meanY(p.id) - meanY(q.id) || p.label.localeCompare(q.label))) {
-      const want = meanY(l.id);
-      l._x = libX;
-      l._w = libW;
-      l._y = Math.max(floor, isFinite(want) ? want : floor);
-      floor = l._y + NODE_H + LIB_VGAP;
+    const mean = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : Infinity;
+    const owners = new Map();
+    for (const l of g.libs) {
+      const key = libGroup(l.id);
+      if (!owners.has(key)) owners.set(key, []);
+      owners.get(key).push(l);
     }
-    if (libCutX === null) {
-      boxes.push({
-        label: LIB_HEADING, color: LIB_COLOR, labelX: 14, labelY: 23,
-        fillOpacity: 0.05, strokeOpacity: 0.35,
-        pad: LIB_PAD, head: LIB_HEAD, minW: 0,
-        nodes: g.libs, kids: [], members: g.libs,
-      });
+    const blocks = [...owners].map(([key, libs]) => ({
+      key,
+      want: mean(libs.flatMap(l => ys.get(l.id))),
+      libs: libs.sort((p, q) => mean(ys.get(p.id)) - mean(ys.get(q.id)) || p.label.localeCompare(q.label)),
+    })).sort((p, q) => p.want - q.want || p.key.localeCompare(q.key));
+    let floor = MARGIN_TOP + LIB_HEAD, prevBottom = null;
+    for (const b of blocks) {
+      const blockH = b.libs.length * (NODE_H + LIB_VGAP) - LIB_VGAP;
+      let y = Math.max(floor, isFinite(b.want) ? b.want - (blockH - NODE_H) / 2 : floor);
+      if (prevBottom !== null) libSeps.push((prevBottom + y) / 2);
+      for (const l of b.libs) {
+        l._x = libX;
+        l._w = libW;
+        l._y = y;
+        y += NODE_H + LIB_VGAP;
+      }
+      prevBottom = y - LIB_VGAP;
+      floor = prevBottom + LIB_GROUP_GAP;
     }
   }
 
@@ -1221,6 +1241,8 @@ function render(g) {
   if (libCutX !== null) {
     svg.appendChild(el("rect", { class: "lib-column", x: libCutX, y: 0, width: "100%", height: "100%", fill: LIB_COLOR }));
     svg.appendChild(el("line", { class: "layer-line", x1: libCutX, x2: libCutX, y1: 0, y2: "100%" }));
+    // Like the bands, the lines between owners stay at their home spot when libs are dragged.
+    for (const y of libSeps) svg.appendChild(el("line", { class: "lib-sep", x1: libCutX, x2: "100%", y1: y, y2: y }));
     const heading = el("text", { class: "box-label", fill: LIB_COLOR, x: libCutX + LIB_COL_PAD, y: MARGIN_TOP });
     heading.textContent = LIB_HEADING;
     svg.appendChild(heading);
@@ -1855,7 +1877,7 @@ document.getElementById("info").addEventListener("click", ev => {
 document.getElementById("showLibs").addEventListener("change", () => { if (currentGraph) render(currentGraph); });
 document.getElementById("showSupport").addEventListener("change", () => { if (fetchedGraph) showView(); });
 // The libraries' column follows the window's right edge.
-window.addEventListener("resize", () => { if (currentGraph?._layout.gutter) render(currentGraph); });
+window.addEventListener("resize", () => { if (currentGraph && document.getElementById("showLibs").checked) render(currentGraph); });
 document.getElementById("showImplied").addEventListener("change", ev => {
   document.body.classList.toggle("show-implied", ev.target.checked);
 });
