@@ -10,9 +10,11 @@
 #    Import depth is what the graph already shows without a config.
 # 3. Write the sections below. Leave out any that wouldn't add something.
 # 4. Run `go-deps-view -json > /dev/null` again. It has to exit 0 and print no
-#    warnings: invalid YAML is an error, and an entry matching nothing is a
-#    warning. A misspelled key is silently ignored, so check the key names
-#    against the ones below.
+#    warnings: invalid YAML is an error, and an entry matching nothing, an entry
+#    listed in two layers, or a layer that gets no band is a warning. A layer gets
+#    no band when its packages all sit inside a folder another layer owns; the
+#    warning names the folders to flatten. A misspelled key is silently ignored,
+#    so check the key names against the ones below.
 # 5. Replace this guide with a line saying what the file is, once it has done its job.
 #
 # Sections:
@@ -28,7 +30,19 @@
 #                 are required) is everything not listed. Prefer folders and include
 #                 a "*" layer, so that new packages land somewhere sensible.
 #                 Layers order items sharing a parent folder and never split a folder
-#                 box, so a nested path only moves it inside its folder's box.
+#                 box, so a nested path only moves it inside its folder's box, and
+#                 only layers holding top-level items get a band (or, when
+#                 everything sits in one folder, items directly inside it). Use
+#                 flatten to layer what is inside a folder.
+#
+# flatten   Folders whose box to dissolve: their packages and subfolders move up into
+#           the parent folder, or to the top level, as if the box weren't there.
+#           Needed when layers should tell apart what sits in one folder, like
+#           internal/testutil and the rest of internal. A module keeping everything
+#           under one folder needs no entry for it: its box spans the bands. Takes
+#           folder paths, not "." or "*"; list a nested folder too to dissolve it
+#           as well. A moved item's label keeps the dissolved prefix where it is
+#           needed, like internal/x.
 #
 # hidden    What starts toggled off: greyed out in place, with no arrows, until
 #           someone clicks it or "show all". Use it for noise worth keeping reachable,
@@ -49,6 +63,8 @@
 # at the module root describes the project, so the root package never shows one.
 #
 # Example, to adapt and uncomment:
+# flatten: [internal] # lets internal/testutil leave the internal box for Support
+#
 # layers:
 #   - name: Entry point
 #     description: What the user runs

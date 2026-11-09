@@ -18,9 +18,9 @@ import (
 // Node is one in-module Go package. The viewer derives its folder-box nesting and
 // layer from the ID and the edges; Name tells it which packages are programs.
 type Node struct {
-	ID     string `json:"id"`     // module-relative path, e.g. "./app/router" ("." is the module root)
-	Pkg    string `json:"pkg"`    // full import path
-	Name   string `json:"name"`   // package clause name, "main" for a program
+	ID      string `json:"id"`      // module-relative path, e.g. "./app/router" ("." is the module root)
+	Pkg     string `json:"pkg"`     // full import path
+	Name    string `json:"name"`    // package clause name, "main" for a program
 	Readme  bool   `json:"readme"`  // its folder has a README, which Readme renders
 	Hidden  bool   `json:"hidden"`  // configured to start toggled off in the viewer
 	Support bool   `json:"support"` // configured as support code, like a test helper, the viewer can leave out
@@ -35,8 +35,8 @@ type Edge struct {
 // Lib is an external dependency module imported directly by the project. Libs
 // live in their own box to the side; they are not layered.
 type Lib struct {
-	ID     string `json:"id"`     // module path, e.g. "github.com/gorilla/mux"
-	Label  string `json:"label"`  // short display name
+	ID      string `json:"id"`      // module path, e.g. "github.com/gorilla/mux"
+	Label   string `json:"label"`   // short display name
 	Hidden  bool   `json:"hidden"`  // configured to start toggled off in the viewer
 	Support bool   `json:"support"` // as for nodes
 }
@@ -44,12 +44,13 @@ type Lib struct {
 // Graph is the whole dependency graph: in-module packages and their import
 // edges, plus the external libraries the project imports directly.
 type Graph struct {
-	Module   string  `json:"module"`
-	Nodes    []Node  `json:"nodes"`
-	Edges    []Edge  `json:"edges"`
-	Libs     []Lib   `json:"libs"`     // external dependency modules
-	LibEdges []Edge  `json:"libEdges"` // project package -> lib module
-	Layers   []Layer `json:"layers"`   // configured layers, top first; empty when not configured
+	Module   string   `json:"module"`
+	Nodes    []Node   `json:"nodes"`
+	Edges    []Edge   `json:"edges"`
+	Libs     []Lib    `json:"libs"`     // external dependency modules
+	LibEdges []Edge   `json:"libEdges"` // project package -> lib module
+	Layers   []Layer  `json:"layers"`   // configured layers, top first; empty when not configured
+	Flatten  []string `json:"flatten"`  // configured folders whose box the viewer dissolves, in node ID form
 }
 
 // goListPkg is the subset of `go list -deps -json` output that we use.
@@ -221,6 +222,9 @@ func ensureNonNil(g *Graph) {
 	}
 	if g.Layers == nil {
 		g.Layers = []Layer{}
+	}
+	if g.Flatten == nil {
+		g.Flatten = []string{}
 	}
 }
 

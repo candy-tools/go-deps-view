@@ -46,6 +46,7 @@ app/cmd            ← flag parsing, -json / -init / -version, dispatch
 | `libs` | external dependency modules; `id` is the module path, `label` is shortened, `hidden` and `support` as for nodes |
 | `libEdges` | `package imports library` |
 | `layers` | configured layers, top first: `name`, `description`, `entrypoint`, and `packages` (node ids or folder paths in id form, or `*`) |
+| `flatten` | configured folders, in id form, whose box the viewer dissolves into the parent folder |
 
 - **Layers config:** `Build` reads the YAML file `.go-deps-view.config` from the scanned
   directory on every call (`internal/graph/config.go`). The Go side only parses and passes
@@ -54,6 +55,14 @@ app/cmd            ← flag parsing, -json / -init / -version, dispatch
   still holding the dropped `info` key) keeps working; the price is that a misspelled
   key silently does nothing. An entry matching no
   package only warns on stderr, because `-exclude` can legitimately cause it.
+- **Flatten and band checks:** the same file's `flatten` list (folders, never `.` or
+  `*`) is passed through as `flatten`. Since a layer without band-level items gets no
+  band, `bands.go` rebuilds the viewer's folder tree (`folderTree`, `bandItems`,
+  `layerIndex`) only to warn about such layers and name the folders to flatten, and
+  warns about flatten entries that dissolve nothing and entries listed in two layers
+  (the first layer wins, on both sides). This is a config check, not layout, but it
+  must stay in sync with `buildTree`, `flattenTree`, `toItem`, `bandBox` and `layerOf` in the
+  viewer; comments on both sides say so.
 - **READMEs, not config:** a package's notes live in a README in its folder
   (`readme.go`; `README.md`, `README.markdown` or `README`, any case), not in the config,
   which dropped its `info` key and now ignores it. `Build` only sets the node's `readme`
@@ -145,9 +154,14 @@ else is optimised around them.
    side, which doubled the width of a 63-package module. Configured layers work inside
    this scheme: an item takes the layer of its closest listed path, siblings stack by
    layer, and only imports between siblings in the same layer order them. That is why
-   layers can't split a folder, and why a config-free graph lays out unchanged. A package
+   layers can't split a folder, and why a config-free graph lays out unchanged. To
+   layer what is inside a folder, `flatten` dissolves its box before any of this:
+   `flattenTree` splices its package and children into the parent, keyed by path,
+   and relabels them relative to the nearest box still drawn. A package
    is an entry point if its layer has `entrypoint` set, using that same closest-path
-   lookup. Layers with top-level items get a band, tinted on every other layer, topped
+   lookup. Bands are made of the top-level items or, while those are a single folder
+   box (`bandBox`), of its items, so a module living in one folder keeps its box, which
+   spans the bands. Layers with such items get a band, tinted on every other layer, topped
    by a solid line in extra space (`LAYER_GAP`) added at the boundary. Bands sit at home
    positions and ignore drags. The svg has no `viewBox` and is at least as big as its
    container, so percentage-sized bands reach the window's edges on a small graph. A

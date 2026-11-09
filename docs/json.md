@@ -18,7 +18,8 @@ the viewer.
   "layers": [
     { "name": "Entry", "description": "", "entrypoint": true, "packages": ["./app/cmd"] },
     { "name": "", "description": "", "entrypoint": false, "packages": ["*"] }
-  ]
+  ],
+  "flatten": ["./internal"]
 }
 ```
 
@@ -32,6 +33,7 @@ the viewer.
 - `libEdges` — `package imports library`.
 - `layers` — the configured layers, top first; `packages` entries are in `id` form,
   plus `*`.
+- `flatten` — the configured folders whose box the viewer dissolves, in `id` form.
 
 Empty collections are emitted as `[]` (never `null`), and standard-library
 imports are excluded.

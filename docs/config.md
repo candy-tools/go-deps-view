@@ -38,9 +38,13 @@ layers:
 - Without a `"*"` entry, unlisted packages go below all the layers.
 - Inside a layer, importers still sit above what they import. An import that goes
   against the configured order is drawn as an arrow pointing up.
-- Layers order items that share a parent folder, and a folder box is never split.
-  Listing `tagging/storetest` positions it inside the `tagging` box, relative to its
-  siblings there. Only layers holding top-level items get a band.
+- Layers order items that share a parent folder, and
+  [a folder box is never split](#flatten). Listing `tagging/storetest` positions it
+  inside the `tagging` box, relative to its siblings there. Only layers holding
+  top-level items get a band, or, when everything sits in one folder, items directly
+  inside it. A layer that gets no band prints a warning saying which folders to
+  flatten.
+- An entry listed in more than one layer belongs to the first, and prints a warning.
 - Layers show as alternating background bands split by a solid line, with their text
   in a gutter left of the graph. A band grows if its text needs the room. Bands mark
   the configured layout, so they stay put when you drag packages, and packages can't
@@ -54,6 +58,55 @@ layers:
 
 The file is read on every request, so reload the page to see an edit. To remove
 packages from the graph altogether, use `-exclude` instead.
+
+## Flatten
+
+Bands are made of the top-level items. A module that keeps everything under one
+folder, as libraries often do (`gormdb/...`, `pkg/...`), has a single top-level box,
+so there the bands are made of what that folder holds, and its box runs through them.
+
+Below that level, layers never split a folder box: packages inside a folder stay in
+its box, in its band. The top-level `flatten` key dissolves folder boxes: a listed
+folder's own package and its subfolders move up into the parent folder, as if the box
+weren't there. Take `github.com/go-bumbu/db`:
+
+```
+gormdb                      core: Cfg, Open, driver interfaces
+gormdb/sqlite               driver
+gormdb/sqlitecgo            driver
+gormdb/postgres             driver
+gormdb/internal/sqliteerr   helper shared by the SQLite drivers
+gormdb/internal/sqlitetest  shared test suite (support)
+gormdb/gormdbtest           test helper (support)
+```
+
+```yaml
+flatten: [gormdb/internal]
+layers:
+  - name: Drivers
+    packages: [gormdb/sqlite, gormdb/sqlitecgo, gormdb/postgres]
+  - name: Core
+    packages: [gormdb, "*"]
+  - name: Internal
+    packages: [gormdb/internal/sqliteerr]
+  - name: Test helpers
+    packages: [gormdb/gormdbtest, gormdb/internal/sqlitetest]
+support: [gormdb/gormdbtest, gormdb/internal/sqlitetest]
+```
+
+Everything sits in `gormdb`, so its box spans the four bands. Flattening
+`gormdb/internal` lets `sqliteerr` and `sqlitetest` sit in different layers. Without
+it, `go-deps-view` warns that Internal gets no band. To drop the `gormdb` box as
+well, flatten it too: `flatten: [gormdb, gormdb/internal]`.
+
+- Entries are folder paths, like layer entries. `.` and `"*"` are not allowed, and an
+  entry naming no folder, or a package without subfolders, prints a warning.
+- Nested entries dissolve bottom-up, whatever order they are listed in.
+- A moved item's label is its path relative to the nearest box still drawn:
+  `gormdb/sqlite` shows as `sqlite`, `gormdb/internal/sqliteerr` as
+  `internal/sqliteerr`. A top-level item keeps its plain name, unless a sibling
+  shares it, and then both show their full path.
+- Layers, `hidden` and `support` keep naming packages by their real paths.
 
 ## Hidden packages
 

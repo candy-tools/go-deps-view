@@ -1,9 +1,11 @@
 package graph
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -110,6 +112,21 @@ func TestBuildEmptyCollectionsAreNonNil(t *testing.T) {
 	}
 	if len(g.Libs) != 0 || len(g.Edges) != 0 || len(g.LibEdges) != 0 {
 		t.Errorf("expected empty edges/libs, got %+v", g)
+	}
+}
+
+// The viewer reads flatten unconditionally, so it must be [] without a config.
+func TestBuildWithoutConfigHasEmptyFlatten(t *testing.T) {
+	g, err := Build(writeMinimalModule(t), nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	data, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"flatten":[]`) {
+		t.Errorf("graph JSON = %s, want \"flatten\":[]", data)
 	}
 }
 
