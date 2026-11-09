@@ -38,7 +38,7 @@ Open <http://localhost:8099>. To define your own layers, run `go-deps-view -init
 fill in the `.go-deps-view.config` it writes.
 
 - [Usage](docs/usage.md): flags and what the viewer shows
-- [Configuration](docs/config.md): layers, hidden and support packages, package READMEs
+- [Configuration](docs/config.md): layers, flattening folders, hidden and support packages, package READMEs
 - [JSON output](docs/json.md): the `-json` and `/symbols.json` formats
 
 ## Development

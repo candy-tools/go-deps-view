@@ -50,6 +50,9 @@ type config struct {
 	// Support lists the packages, folders and library module paths that only exist to
 	// support or verify the rest, like test helpers, which the viewer can leave out.
 	Support []string `yaml:"support"`
+	// Flatten lists the folders whose box the viewer dissolves, moving their contents
+	// up into the parent folder, so that layers can tell them apart.
+	Flatten []string `yaml:"flatten"`
 }
 
 // InitConfig writes a config template into dir and returns its path. The template
@@ -93,14 +96,22 @@ func applyConfig(g *Graph, dir string) error {
 		return fmt.Errorf("%s: %w", configFile, err)
 	}
 	g.Layers = cfg.Layers
+	g.Flatten = cfg.Flatten
+	var warnings []string
 	for _, entry := range unmatchedEntries(g.Layers, g.Nodes) {
-		fmt.Fprintf(os.Stderr, "go-deps-view: %s: %q matches no package\n", configFile, entry)
+		warnings = append(warnings, fmt.Sprintf("%q matches no package", entry))
 	}
 	for _, entry := range applyHidden(g, cfg.Hidden) {
-		fmt.Fprintf(os.Stderr, "go-deps-view: %s: hidden entry %q matches no package or library\n", configFile, entry)
+		warnings = append(warnings, fmt.Sprintf("hidden entry %q matches no package or library", entry))
 	}
 	for _, entry := range applySupport(g, cfg.Support) {
-		fmt.Fprintf(os.Stderr, "go-deps-view: %s: support entry %q matches no package or library\n", configFile, entry)
+		warnings = append(warnings, fmt.Sprintf("support entry %q matches no package or library", entry))
+	}
+	warnings = append(warnings, flattenWarnings(g.Flatten, g.Nodes)...)
+	warnings = append(warnings, duplicateWarnings(g.Layers)...)
+	warnings = append(warnings, bandWarnings(g.Layers, g.Flatten, g.Nodes)...)
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "go-deps-view: %s: %s\n", configFile, w)
 	}
 	return nil
 }
@@ -121,6 +132,13 @@ func parseConfig(data []byte) (config, error) {
 		for j, entry := range layer.Packages {
 			cfg.Layers[i].Packages[j] = packageEntry(entry)
 		}
+	}
+	for i, entry := range cfg.Flatten {
+		id := packageEntry(entry)
+		if id == restEntry || id == "." {
+			return config{}, fmt.Errorf("flatten entry %q: name a folder; the root has no box to dissolve and \"*\" isn't allowed", entry)
+		}
+		cfg.Flatten[i] = id
 	}
 	return cfg, nil
 }

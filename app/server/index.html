@@ -353,19 +353,53 @@ function gutterText(layer) {
 }
 
 // Build a folder tree from package ids. Each tree node is a directory; it may
-// carry a package (pkgId) and/or child directories.
+// carry a package (pkgId) and/or child directories. Children are keyed by path, not
+// name, as a flattened folder's child may share its name with a sibling.
+// internal/graph/bands.go mirrors buildTree and flattenTree to warn about layers
+// that get no band: keep them in sync.
 function buildTree(nodes) {
-  const root = { name: "", path: ".", pkgId: null, children: new Map() };
+  const root = { name: "", label: "", path: ".", pkgId: null, parent: null, children: new Map() };
+  const byPath = new Map([[".", root]]);
   for (const n of nodes) {
     if (n.id === ".") { root.pkgId = "."; continue; }
-    const segs = n.id.replace(/^\.\//, "").split("/");
     let cur = root;
-    for (const s of segs) {
-      if (!cur.children.has(s)) cur.children.set(s, { name: s, path: cur.path + "/" + s, pkgId: null, children: new Map() });
-      cur = cur.children.get(s);
+    for (const s of n.id.replace(/^\.\//, "").split("/")) {
+      const path = cur.path + "/" + s;
+      if (!cur.children.has(path)) {
+        const dir = { name: s, label: s, path, pkgId: null, parent: cur, children: new Map() };
+        cur.children.set(path, dir);
+        byPath.set(path, dir);
+      }
+      cur = cur.children.get(path);
     }
     cur.pkgId = n.id;
   }
+  return { root, byPath };
+}
+
+// Dissolves the configured folders, deepest first: each one's package and children
+// move up into its parent, as if its box weren't there. A moved item's label keeps
+// the dissolved folder as a prefix, so it reads as the path relative to the nearest
+// box still drawn ("internal/x"). A top-level item keeps its plain name, unless a
+// sibling shares it, and then both show their full path.
+function flattenTree({ root, byPath }, flatten) {
+  const depth = path => path.split("/").length;
+  for (const path of [...flatten].sort((a, b) => depth(b) - depth(a))) {
+    const dir = byPath.get(path);
+    if (!dir?.parent || !dir.children.size) continue; // gone, or nothing to dissolve
+    const parent = dir.parent;
+    parent.children.delete(path);
+    if (dir.pkgId) parent.children.set(path, { ...dir, parent, children: new Map() });
+    for (const kid of dir.children.values()) {
+      kid.parent = parent;
+      if (parent !== root) kid.label = dir.label + "/" + kid.label;
+      parent.children.set(kid.path, kid);
+    }
+    dir.parent = null;
+  }
+  const count = new Map();
+  for (const kid of root.children.values()) count.set(kid.label, (count.get(kid.label) || 0) + 1);
+  for (const kid of root.children.values()) if (count.get(kid.label) > 1) kid.label = kid.path.slice(2);
   return root;
 }
 
@@ -435,8 +469,8 @@ function layoutPackages(g) {
   };
   const boxes = []; // children before their parents; the last one is the root
   const toItem = (dir, prefix, depth) => {
-    const name = prefix + dir.name;
-    const kids = [...dir.children.values()].sort((a, b) => a.name.localeCompare(b.name));
+    const name = prefix + dir.label;
+    const kids = [...dir.children.values()].sort((a, b) => a.label.localeCompare(b.label));
     const isRoot = depth === 0;
     if (!isRoot && !kids.length) return pkgItem(dir.pkgId, name);
     if (!isRoot && !dir.pkgId && kids.length === 1) return toItem(kids[0], name + "/", depth);
@@ -447,16 +481,18 @@ function layoutPackages(g) {
     boxes.push(box);
     return box;
   };
-  const root = toItem(buildTree(g.nodes), "", 0);
+  const root = toItem(flattenTree(buildTree(g.nodes), g.flatten), "", 0);
 
   // Configured layers, top first. An item takes the layer of its closest listed
   // path, or the "*" layer, which defaults to below everything listed. Layers only
-  // order siblings, so a folder stays in one piece wherever its packages are listed.
+  // order siblings, so a folder stays in one piece wherever its packages are listed;
+  // flatten dissolves a folder to layer what is inside it. An entry listed twice
+  // belongs to the first layer, as the Go side's newLayerIndex assumes.
   const layerOfPath = new Map();
   let restLayer = g.layers.length;
   g.layers.forEach((layer, i) => layer.packages.forEach(entry => {
-    if (entry === "*") restLayer = i;
-    else layerOfPath.set(entry, i);
+    if (entry === "*") restLayer = Math.min(restLayer, i);
+    else if (!layerOfPath.has(entry)) layerOfPath.set(entry, i);
   }));
   const layerOf = path => {
     if (layerOfPath.has(path)) return layerOfPath.get(path);
@@ -570,12 +606,18 @@ function layoutPackages(g) {
     head[b.hi] = Math.max(head[b.hi], b.headCount);
     foot[b.lo] = Math.max(foot[b.lo], b.footCount);
   }
-  // Each layer holding top-level items gets a band, topped by its highest row. Layers
-  // listing only nested paths have no band of their own to mark. Boundaries get extra
-  // room for the line; the top row never starts one, and the gutter only exists with
-  // layers, so a graph without them lays out exactly as it would otherwise.
+  // Bands are made of the top-level items or, when the top level holds nothing but one
+  // folder box, of that box's items, so a module keeping everything in one folder can
+  // still be layered; its box then spans the bands. Each layer holding such items gets
+  // a band, topped by its highest row. Layers listing only paths nested deeper have no
+  // band of their own to mark; bandWarnings in internal/graph/bands.go reports them, so
+  // keep its bandItems in sync. Boundaries get extra room for the line; the top row
+  // never starts one, and the gutter only exists with layers, so a graph without them
+  // lays out exactly as it would otherwise.
+  let bandBox = root;
+  while (bandBox.items.length === 1 && bandBox.items[0].kind === "box") bandBox = bandBox.items[0];
   const layerTop = new Map();
-  for (const it of root.items) {
+  for (const it of bandBox.items) {
     const i = layerOf(it.path);
     layerTop.set(i, Math.max(layerTop.get(i) ?? -1, it.hi));
   }
@@ -794,7 +836,7 @@ function withoutSupport(g) {
   const libs = g.libs.filter(l => !l.support && imported.has(l.id)).map(l => ({ ...l }));
   const libIds = new Set(libs.map(l => l.id));
   return {
-    module: g.module, layers: g.layers, nodes, libs,
+    module: g.module, layers: g.layers, flatten: g.flatten, nodes, libs,
     edges: g.edges.filter(e => kept.has(e.from) && kept.has(e.to)).map(e => ({ ...e })),
     libEdges: libEdges.filter(e => libIds.has(e.to)),
   };

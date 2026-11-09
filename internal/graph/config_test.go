@@ -60,6 +60,9 @@ func TestParseConfigErrors(t *testing.T) {
 		{"invalid yaml", "layers: [\n", "yaml"},
 		{"unquoted wildcard", "layers:\n  - packages: [*]\n", "yaml"},
 		{"layer without packages", "layers:\n  - name: Entry\n", "lists no packages"},
+		{"flattening everything", "flatten: [\"*\"]\n", "flatten entry"},
+		{"flattening the root", "flatten: [.]\n", "flatten entry"},
+		{"flattening the root, written differently", "flatten: [./]\n", "flatten entry"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -269,6 +272,9 @@ func TestInitConfigCreatesAFileThatChangesNothing(t *testing.T) {
 	if want := filepath.Join(mod, configFile); path != want {
 		t.Errorf("path = %q, want %q", path, want)
 	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != configTemplate {
+		t.Errorf("config = %q (%v), want the plain template, as the module has a root package", data, err)
+	}
 	g, err := Build(mod, nil)
 	if err != nil {
 		t.Fatalf("Build with the new config: %v", err)
@@ -330,8 +336,8 @@ func TestConfigTemplateExampleIsValid(t *testing.T) {
 	if err := strict.Decode(&config{}); err != nil {
 		t.Errorf("uncommented example has an unknown key: %v", err)
 	}
-	if len(cfg.Layers) == 0 || len(cfg.Hidden) == 0 || len(cfg.Support) == 0 {
-		t.Errorf("example = %+v, want layers, hidden and support all shown", cfg)
+	if len(cfg.Layers) == 0 || len(cfg.Hidden) == 0 || len(cfg.Support) == 0 || len(cfg.Flatten) == 0 {
+		t.Errorf("example = %+v, want layers, hidden, support and flatten all shown", cfg)
 	}
 }
 
