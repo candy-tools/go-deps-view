@@ -9,7 +9,7 @@ graph to a small, dependency-free browser viewer that is embedded in the binary.
 All grouping and layout is derived from the package paths and their imports,
 optionally steered by a [layers config](#layers-config).
 
-![go-deps-view rendering its own package dependency graph](docs/screenshot.png)
+![go-deps-view rendering the go-bumbu reference-app's package dependency graph](docs/screenshot.jpg)
 
 > **Requires the Go toolchain on `PATH`.** The graph is built by running
 > `go list` against the target module on each request.
